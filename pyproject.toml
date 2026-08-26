@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "duo-cli"
+version = "1.0.0"
+description = "Modern Duolingo Command Line Interface and Automated Learning Engine in Python"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Duo-CLI Contributors" }
+]
+keywords = ["duolingo", "cli", "terminal", "tui", "learning", "languages"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Education",
+]
+dependencies = [
+    "requests>=2.31.0",
+    "rich>=13.0.0",
+    "click>=8.0.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Matysekxx/duo-cli"
+"Bug Tracker" = "https://github.com/Matysekxx/duo-cli/issues"
+
+[project.scripts]
+duo = "duo.cli:main"
+duo-cli = "duo.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["duo*"]
