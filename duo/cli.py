@@ -302,6 +302,7 @@ def practice_cmd(lang: Optional[str]) -> None:
 @click.option("--sessions", "-s", default=1, type=int, help="Number of practice sessions to complete (default: 1)")
 @click.option("--target-xp", "-x", default=None, type=int, help="Target XP to earn before stopping")
 @click.option("--until-goal", "-g", is_flag=True, help="Run practice sessions until today's daily XP goal is reached")
+@click.option("--loop", "-L", is_flag=True, help="Run practice sessions forever (until Ctrl+C)")
 @click.option("--lang", "-l", default=None, help="Target language code (e.g. es, de, fr)")
 @click.option("--delay-min", default=1.2, type=float, help="Minimum delay between questions in seconds (default: 1.2)")
 @click.option("--delay-max", default=2.8, type=float, help="Maximum delay between questions in seconds (default: 2.8)")
@@ -310,6 +311,7 @@ def auto_cmd(
     sessions: int,
     target_xp: Optional[int],
     until_goal: bool,
+    loop: bool,
     lang: Optional[str],
     delay_min: float,
     delay_max: float,
@@ -327,7 +329,7 @@ def auto_cmd(
         delay_max=delay_max,
         fast=fast,
     )
-    bot.run(sessions=sessions, target_xp=target_xp, until_goal=until_goal)
+    bot.run(sessions=sessions, target_xp=target_xp, until_goal=until_goal, loop=loop)
 
 
 @cli.command("help")
@@ -398,10 +400,11 @@ def shell_cmd() -> None:
                         # Support parsing flags inside shell
                         fast = "--fast" in args
                         until_goal = "-g" in args or "--until-goal" in args
+                        loop = "-L" in args or "--loop" in args
                         sessions = 1
                         target_xp = None
                         lang = None
-                        
+
                         for i, a in enumerate(args):
                             if a in ["-s", "--sessions"] and i + 1 < len(args) and args[i + 1].isdigit():
                                 sessions = int(args[i + 1])
@@ -410,7 +413,7 @@ def shell_cmd() -> None:
                             elif a in ["-l", "--lang"] and i + 1 < len(args):
                                 lang = args[i + 1]
 
-                        ctx.invoke(cmd_map[cmd_name], sessions=sessions, target_xp=target_xp, until_goal=until_goal, lang=lang, fast=fast)
+                        ctx.invoke(cmd_map[cmd_name], sessions=sessions, target_xp=target_xp, until_goal=until_goal, loop=loop, lang=lang, fast=fast)
                     else:
                         ctx.invoke(cmd_map[cmd_name])
                 except Exception as ex:

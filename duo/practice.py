@@ -7,7 +7,7 @@ import time
 from typing import Any, Dict, List, Optional
 from rich.prompt import Prompt
 
-from .api import DuoClient, extract_challenge_solution
+from .api import DuoClient, extract_challenge_solution, get_flag
 from .config import is_audio_snoozed, set_audio_snooze
 from .ui import (
     DIVIDER_LINE,
@@ -16,10 +16,14 @@ from .ui import (
     print_info,
     print_success,
     print_warning,
+    render_answer_result,
     render_auto_challenge,
     render_auto_header,
     render_auto_session_result,
     render_auto_summary,
+    render_freeform_card,
+    render_match_panel,
+    render_question_card,
 )
 
 CURATED_CHALLENGES = {
@@ -126,10 +130,6 @@ class PracticeSession:
                 console.print("\n[bold bright_red]💔 You ran out of hearts! Practice session ended.[/]\n")
                 break
 
-            console.print(f"\n[bold bright_cyan]Question {idx}/{len(questions)}[/] [dim](Hearts: {self.hearts}/5)[/dim]")
-            if self.combo >= 2:
-                console.print(f"[bold bright_yellow]🔥 COMBO x{self.combo}![/]")
-
             q_type = q.get("type", "")
             if is_audio_snoozed() and q_type in ["speak", "listenSpeak", "listen", "listenTap", "listenComplete", "listenIsolation", "listenMatch", "partialListen"]:
                 console.print(f"\n[dim yellow]🔇 Audio/Speaking exercise snoozed for 15 min. Auto-completed! ✔[/dim yellow]")
@@ -144,18 +144,13 @@ class PracticeSession:
                 continue
 
             prompt_text = q.get("prompt", "")
-            if prompt_text:
-                console.print(f"[bold bright_white]{prompt_text}[/]")
-
             correct_raw = q.get("answer", "")
             solutions = [normalize_answer(s) for s in q.get("solutions", [])] if q.get("solutions") else [normalize_answer(correct_raw)]
 
             pair_tuples = q.get("pair_tuples", [])
             choices = q.get("choices", [])
-            shuffled_choices = []
 
             if pair_tuples and len(pair_tuples) > 1:
-                console.print("\n[dim]Match each word with its corresponding translation:[/dim]")
                 remaining_right = [p[1] for p in pair_tuples]
                 random.shuffle(remaining_right)
 
@@ -165,9 +160,7 @@ class PracticeSession:
                         console.print(f"\n  [bold bright_white]•[/] [bold bright_yellow]{lw}[/] ⇄ [bold bright_green]{remaining_right[0]}[/] [dim](Auto-matched)[/dim]")
                         break
 
-                    console.print(f"\n  [bold bright_white][{p_idx}/{len(pair_tuples)}][/] What is the translation for: [bold bright_yellow]'{lw}'[/]?")
-                    for o_idx, opt in enumerate(remaining_right, 1):
-                        console.print(f"    [bold yellow]{o_idx}.[/] {opt}")
+                    render_match_panel(lw, remaining_right, p_idx, len(pair_tuples), self.hearts, self.combo, self.lang_code)
 
                     ans = Prompt.ask(f"    [bold bright_green]Choice (1-{len(remaining_right)})[/]").strip()
                     if ans.lower() in ["exit", "quit", "q"]:
@@ -202,9 +195,9 @@ class PracticeSession:
             else:
                 shuffled_choices = list(choices)
                 if shuffled_choices:
-                    console.print()
-                    for c_idx, choice in enumerate(shuffled_choices, 1):
-                        console.print(f"  [bold yellow]{c_idx}.[/] {choice}")
+                    render_question_card(idx, len(questions), prompt_text, shuffled_choices, self.hearts, self.combo, self.lang_code, q_type)
+                else:
+                    render_freeform_card(idx, len(questions), prompt_text, self.hearts, self.combo, self.lang_code, q_type)
 
                 prompt_str = f"[bold bright_green]Your answer (1-{len(shuffled_choices)})[/]" if shuffled_choices else "[bold bright_green]Your answer[/]"
                 user_input = Prompt.ask(f"\n{prompt_str}").strip()
@@ -233,7 +226,7 @@ class PracticeSession:
                 self.score += 1
                 self.combo += 1
                 self.max_combo = max(self.max_combo, self.combo)
-                console.print(f"\n[bold bright_green]✔ Correct! Well done! 🎉[/] (+10 XP)")
+                render_answer_result(True, correct_raw)
             else:
                 self.hearts -= 1
                 self.combo = 0
@@ -241,7 +234,7 @@ class PracticeSession:
                 if pair_tuples:
                     console.print(f"\n[bold bright_red]✖ Some pairs were incorrect! Lost a heart (Remaining: {self.hearts}/5)[/]")
                 else:
-                    console.print(f"\n[bold bright_red]✖ Incorrect! Lost a heart (Remaining: {self.hearts}/5)[/]\n  [dim]Correct answer:[/] [bold green]{display_ans}[/]")
+                    render_answer_result(False, display_ans)
             time.sleep(0.4)
 
         # Submit results to Duolingo backend if possible
@@ -294,6 +287,7 @@ class AutoPractice:
         sessions: int = 1,
         target_xp: Optional[int] = None,
         until_goal: bool = False,
+        loop: bool = False,
     ) -> None:
         if not self.client.is_authenticated():
             print_error("Automated practice requires authentication. Run 'duo login' first.")
@@ -313,7 +307,7 @@ class AutoPractice:
         daily_goal = streak_info.get("daily_goal", 10)
         current_streak = streak_info.get("site_streak", 0)
 
-        render_auto_header(self.lang_code, sessions, target_xp, until_goal)
+        render_auto_header(self.lang_code, sessions, target_xp, until_goal, loop)
 
         total_xp_earned = 0
         sessions_completed = 0
@@ -323,15 +317,16 @@ class AutoPractice:
             session_num = 0
             while True:
                 session_num += 1
-                # Check stopping conditions
-                if until_goal and (initial_xp_today + total_xp_earned) >= daily_goal:
-                    console.print(f"[bold bright_green]🎯 Daily goal of {daily_goal} XP reached![/]\n")
-                    break
-                if target_xp and total_xp_earned >= target_xp:
-                    console.print(f"[bold bright_green]🎯 Target of {target_xp} XP reached![/]\n")
-                    break
-                if not until_goal and not target_xp and sessions_completed >= sessions:
-                    break
+                # Check stopping conditions (loop mode never stops on its own)
+                if not loop:
+                    if until_goal and (initial_xp_today + total_xp_earned) >= daily_goal:
+                        console.print(f"[bold bright_green]🎯 Daily goal of {daily_goal} XP reached![/]\n")
+                        break
+                    if target_xp and total_xp_earned >= target_xp:
+                        console.print(f"[bold bright_green]🎯 Target of {target_xp} XP reached![/]\n")
+                        break
+                    if not until_goal and not target_xp and sessions_completed >= sessions:
+                        break
 
                 console.print(f"[bold bright_cyan]▶ Starting Session {session_num}...[/]")
 
@@ -363,7 +358,7 @@ class AutoPractice:
                     pause = random.uniform(self.delay_min, self.delay_max)
                     render_auto_challenge(
                         session_idx=session_num,
-                        total_sessions=sessions if (not until_goal and not target_xp) else 0,
+                        total_sessions=0 if loop else (sessions if (not until_goal and not target_xp) else 0),
                         q_idx=q_idx,
                         total_q=total_q,
                         prompt=prompt,
@@ -393,16 +388,22 @@ class AutoPractice:
 
                 # Pause between sessions if continuing
                 should_continue = True
-                if until_goal and (initial_xp_today + total_xp_earned) >= daily_goal:
-                    should_continue = False
-                elif target_xp and total_xp_earned >= target_xp:
-                    should_continue = False
-                elif not until_goal and not target_xp and sessions_completed >= sessions:
-                    should_continue = False
+                if not loop:
+                    if until_goal and (initial_xp_today + total_xp_earned) >= daily_goal:
+                        should_continue = False
+                    elif target_xp and total_xp_earned >= target_xp:
+                        should_continue = False
+                    elif not until_goal and not target_xp and sessions_completed >= sessions:
+                        should_continue = False
 
                 if should_continue:
-                    rest_pause = random.uniform(2.0, 3.5) if not self.fast else 0.8
-                    console.print(f"[dim]⏳ Resting for {rest_pause:.1f}s before next session...[/]\n")
+                    # Occasional longer "coffee break" in infinite loop mode to stay safe
+                    if loop and sessions_completed > 0 and sessions_completed % 5 == 0:
+                        rest_pause = random.uniform(30.0, 60.0)
+                        console.print(f"[dim]⏳ Long break for {rest_pause:.0f}s (every 5 sessions in loop mode)...[/]\n")
+                    else:
+                        rest_pause = random.uniform(2.0, 3.5) if not self.fast else 0.8
+                        console.print(f"[dim]⏳ Resting for {rest_pause:.1f}s before next session...[/]\n")
                     time.sleep(rest_pause)
 
         except KeyboardInterrupt:

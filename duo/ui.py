@@ -17,7 +17,10 @@ if sys.platform == "win32":
 
 from rich import box
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
+
+from .api import get_flag
 
 console = Console(file=sys.stdout, force_terminal=True, highlight=False)
 
@@ -299,7 +302,7 @@ def render_help() -> None:
 
     sections = [
         ("AUTOMATION", "Auto-solve & interactive practice", [
-            ("auto", "Automate practice lessons with natural pauses (Flags: -s, -g, -x, --fast)"),
+            ("auto", "Automate practice lessons with natural pauses (Flags: -s, -g, -x, -L, --fast)"),
             ("practice", "Interactive full lesson practice session in terminal (Flags: -l)")
         ]),
         ("STATS & PROGRESS", "Streak, courses, and quests", [
@@ -333,7 +336,7 @@ def render_help() -> None:
     console.print("[dim cyan]──────────────────────────────────────────────────────────────────[/]")
     console.print("  [bright_green]duo[/]                    Show status dashboard")
     console.print("  [bright_green]duo auto -g[/]            Complete daily goal automatically")
-    console.print("  [bright_green]duo auto -s 3 --fast[/]   Solve 3 practice sessions fast")
+    console.print("  [bright_green]duo auto -L[/]            Run practice sessions forever (Ctrl+C to stop)")
     console.print("  [bright_green]duo practice -l es[/]     Interactive Spanish lesson")
     console.print("  [bright_green]duo switch de[/]          Switch course to German")
     console.print("  [bright_green]duo shell[/]               Enter interactive shell")
@@ -342,14 +345,20 @@ def render_help() -> None:
 
 # --- PRACTICE & AUTO TUI COMPONENTS ---
 
-def render_auto_header(lang: str, sessions: int, target_xp: Optional[int], until_goal: bool) -> None:
-    goal_mode = "Until Daily Goal is Met" if until_goal else (f"Target: {target_xp} XP" if target_xp else f"{sessions} Sessions")
+def render_auto_header(lang: str, sessions: int, target_xp: Optional[int], until_goal: bool, loop: bool = False) -> None:
+    if loop:
+        goal_mode = "♾ Infinite Loop (runs forever)"
+    else:
+        goal_mode = "Until Daily Goal is Met" if until_goal else (f"Target: {target_xp} XP" if target_xp else f"{sessions} Sessions")
     console.print()
     console.print("[bold bright_green]⚡ DUOLINGO AUTO PRACTICE BOT[/]")
     console.print(f"[dim green]{DIVIDER_LINE}[/]")
     console.print(f"  Language : [bold bright_cyan]{lang.upper()}[/] | Mode: [bold bright_yellow]{goal_mode}[/]")
     console.print("  [dim]Solving lessons automatically with natural randomized pauses...[/]")
-    console.print("  [dim]Press [bold]Ctrl+C[/bold] at any time to safely stop and save progress.[/]")
+    if loop:
+        console.print("  [dim]Runs endlessly until you press [bold]Ctrl+C[/bold]. A longer break is taken every 5 sessions.[/]")
+    else:
+        console.print("  [dim]Press [bold]Ctrl+C[/bold] at any time to safely stop and save progress.[/]")
     console.print(f"[dim green]{DIVIDER_LINE}[/]")
     console.print()
 
@@ -392,3 +401,131 @@ def render_auto_summary(sessions_completed: int, total_xp: int, streak_days: int
         console.print(congrats, end="")
     console.print(f"[dim green]{DIVIDER_LINE}[/]")
     console.print()
+
+
+def render_question_card(
+    q_idx: int,
+    total_q: int,
+    prompt: str,
+    choices: List[str],
+    hearts: int,
+    combo: int,
+    lang_code: Optional[str],
+    q_type: str = "",
+) -> None:
+    """Render a single practice question as a beautiful Duolingo-style card."""
+    flag = get_flag(lang_code)
+    max_hearts = 5
+    hearts_bar = " ".join(
+        "[bold bright_red]♥[/]" if i < hearts else "[dim]♡[/]" for i in range(max_hearts)
+    )
+    combo_badge = f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
+
+    type_label = ""
+    if q_type:
+        pretty = {
+            "translate": "Translation",
+            "assist": "Translation",
+            "select": "Multiple Choice",
+            "gapFill": "Fill the Blank",
+            "match": "Matching",
+            "listen": "Listening",
+            "speak": "Speaking",
+        }.get(q_type, q_type)
+        type_label = f"  [dim]{pretty}[/]"
+
+    title = f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]{type_label}   {hearts_bar}{combo_badge}"
+
+    lines = [f"[bold bright_white]{prompt}[/]"]
+    if choices:
+        lines.append("")
+        for i, c in enumerate(choices, 1):
+            lines.append(f"  [bold bright_yellow]{i}.[/] [white]{c}[/]")
+
+    content = "\n".join(lines)
+    console.print()
+    console.print(
+        Panel(
+            content,
+            title=title,
+            border_style="bright_green",
+            padding=(1, 2),
+            expand=False,
+        )
+    )
+
+
+def render_freeform_card(
+    q_idx: int,
+    total_q: int,
+    prompt: str,
+    hearts: int,
+    combo: int,
+    lang_code: Optional[str],
+    q_type: str = "",
+) -> None:
+    """Render a free-text (typed) question as a clean card."""
+    flag = get_flag(lang_code)
+    max_hearts = 5
+    hearts_bar = " ".join(
+        "[bold bright_red]♥[/]" if i < hearts else "[dim]♡[/]" for i in range(max_hearts)
+    )
+    combo_badge = f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
+    title = f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]   {hearts_bar}{combo_badge}"
+    console.print()
+    console.print(
+        Panel(
+            f"[bold bright_white]{prompt}[/]\n\n[dim]Type your answer below ↓[/]",
+            title=title,
+            border_style="bright_cyan",
+            padding=(1, 2),
+            expand=False,
+        )
+    )
+
+
+def render_match_panel(
+    left_word: str,
+    options: List[str],
+    p_idx: int,
+    total_pairs: int,
+    hearts: int,
+    combo: int,
+    lang_code: Optional[str],
+) -> None:
+    """Render a single matching sub-round as a card."""
+    flag = get_flag(lang_code)
+    max_hearts = 5
+    hearts_bar = " ".join(
+        "[bold bright_red]♥[/]" if i < hearts else "[dim]♡[/]" for i in range(max_hearts)
+    )
+    combo_badge = f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
+    title = f"{flag} [bold bright_cyan]Match {p_idx}/{total_pairs}[/]   {hearts_bar}{combo_badge}"
+
+    lines = [f"[bold bright_yellow]{left_word}[/]  [dim]⇄ choose its translation below[/]"]
+    lines.append("")
+    for i, o in enumerate(options, 1):
+        lines.append(f"  [bold bright_yellow]{i}.[/] [white]{o}[/]")
+
+    console.print()
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title=title,
+            border_style="bright_cyan",
+            padding=(1, 2),
+            expand=False,
+        )
+    )
+
+
+def render_answer_result(is_correct: bool, correct_answer: str, gained_xp: int = 10) -> None:
+    """Render a compact correct/incorrect feedback line after answering."""
+    if is_correct:
+        console.print(
+            f"\n[bold bright_green]✔ Correct![/] [dim]+{gained_xp} XP[/] 🎉"
+        )
+    else:
+        console.print(
+            f"\n[bold bright_red]✖ Incorrect![/] [dim]Correct answer:[/] [bold green]{correct_answer}[/]"
+        )
