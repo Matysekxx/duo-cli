@@ -303,13 +303,12 @@ class AutoPractice:
             print_error("Automated practice requires authentication. Run 'duo login' first.")
             return
 
-        # Safety: unbounded looping (auto -L) looks like botting to Duolingo.
-        # Apply a default cap and warn unless the user set an explicit limit.
+        # -L runs unbounded (user's explicit choice). It is ban-prone, so we
+        # keep the warning but no longer force a cap; use -m to set your own.
         if loop and not self.max_sessions:
-            self.max_sessions = 25
             print_warning(
-                "[bold yellow]⚠ Running forever (-L) is ban-prone. Capping this run to "
-                f"{self.max_sessions} sessions. Use -m/--max-sessions to choose your own limit.[/]"
+                "[bold yellow]⚠ Running forever (-L) is ban-prone and may get the account "
+                "flagged. Consider -m/--max-sessions to set a safe limit.[/]"
             )
 
         # Fetch initial user status
@@ -416,7 +415,7 @@ class AutoPractice:
                     score=score,
                     start_time=session_start_time,
                     hearts_left=self.hearts,
-                    mistakes=max(0, len(server_sess.get("questions", [])) - score),
+                    mistakes=max(0, len(raw_challenges) - score),
                     failed=self.hearts <= 0,
                 )
 
