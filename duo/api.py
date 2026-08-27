@@ -774,9 +774,16 @@ class DuoClient:
         self,
         session_data: Dict[str, Any],
         score: int,
-        start_time: Optional[float] = None
+        start_time: Optional[float] = None,
+        hearts_left: int = 5,
+        mistakes: int = 0,
+        failed: bool = False,
     ) -> Dict[str, Any]:
-        """Submit completed session to Duolingo backend to award real XP and extend streak."""
+        """Submit completed session to Duolingo backend to award real XP and extend streak.
+
+        `hearts_left` and `failed` reflect the actual outcome of the session so
+        the server deducts hearts correctly (it trusts the client-sent value).
+        """
         if not self.is_authenticated():
             return {"xpGain": 0, "streakExtended": False, "serverSync": False, "reason": "Not authenticated"}
 
@@ -804,11 +811,12 @@ class DuoClient:
         url = f"https://www.duolingo.com/2017-06-30/sessions/{session_id}"
         payload = {
             **session_data,
-            "heartsLeft": 5,
+            "heartsLeft": max(0, hearts_left),
+            "mistakes": max(0, mistakes),
             "startTime": start_ts,
             "endTime": end_ts,
             "enableBonusPoints": True,
-            "failed": False,
+            "failed": bool(failed),
             "maxInLessonStreak": max(score, 5),
             "shouldLearnThings": True
         }

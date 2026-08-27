@@ -92,6 +92,16 @@ class PracticeSession:
             )
             return
 
+        # Reflect the user's REAL heart count from the server instead of a
+        # hardcoded local value, so we never silently refill or overstate it.
+        if self.client.is_authenticated():
+            try:
+                h = self.client.get_hearts()
+                if not h.get("is_unlimited") and isinstance(h.get("hearts"), int):
+                    self.hearts = max(0, h["hearts"])
+            except Exception:
+                pass
+
         console.print()
         console.print("[bold bright_green]🦉 DUOLINGO PRACTICE SESSION[/]")
         console.print(f"[dim green]{DIVIDER_LINE}[/]")
@@ -219,7 +229,7 @@ class PracticeSession:
                 self.max_combo = max(self.max_combo, self.combo)
                 render_answer_result(True, correct_raw)
             else:
-                self.hearts -= 1
+                self.hearts = max(0, self.hearts - 1)
                 self.combo = 0
                 display_ans = correct_raw or ((q.get("solutions") or [""])[0])
                 if pair_tuples:
@@ -233,7 +243,14 @@ class PracticeSession:
         if self.client.is_authenticated() and self.score > 0:
             console.print("\n[bold cyan]⏳ Submitting session to Duolingo servers...[/]")
             session_to_submit = self.server_session or {"id": "dummy", "learningLanguage": self.lang_code}
-            sync_res = self.client.submit_practice_session(session_to_submit, self.score, start_time=session_start_time)
+            sync_res = self.client.submit_practice_session(
+                session_to_submit,
+                self.score,
+                start_time=session_start_time,
+                hearts_left=self.hearts,
+                mistakes=max(0, len(questions) - self.score),
+                failed=self.hearts <= 0,
+            )
 
             if sync_res.get("serverSync"):
                 earned_xp = sync_res.get("xpGain", self.score * 10)
@@ -329,6 +346,15 @@ class AutoPractice:
                 try:
                     server_sess = self.client.create_practice_session(self.lang_code)
                     raw_challenges = server_sess.get("challenges", [])
+
+                    # Use the user's real heart count so a perfect run never
+                    # silently refills a depleted account on submit.
+                    try:
+                        h = self.client.get_hearts()
+                        if not h.get("is_unlimited") and isinstance(h.get("hearts"), int):
+                            self.hearts = max(0, h["hearts"])
+                    except Exception:
+                        pass
                 except Exception as e:
                     print_warning(f"Could not load live challenges from server: {e}. Retrying...")
                     time.sleep(2)
@@ -365,7 +391,14 @@ class AutoPractice:
 
                 # Submit session to Duolingo backend
                 console.print(f"  [dim]Submitting session {session_num} to Duolingo servers...[/]")
-                sync_res = self.client.submit_practice_session(server_sess, score=score, start_time=session_start_time)
+                sync_res = self.client.submit_practice_session(
+                    server_sess,
+                    score=score,
+                    start_time=session_start_time,
+                    hearts_left=self.hearts,
+                    mistakes=max(0, len(server_sess.get("questions", [])) - score),
+                    failed=self.hearts <= 0,
+                )
 
                 if sync_res.get("serverSync"):
                     xp_gain = sync_res.get("xpGain", 15)
