@@ -149,38 +149,3 @@ def clear_config() -> None:
 def is_authenticated() -> bool:
     """Check if valid JWT token and username are configured."""
     return bool(get_jwt() and get_username())
-
-
-def get_audio_snooze_until() -> float:
-    """Return unix timestamp until which audio is snoozed, or 0.0."""
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return float(data.get("audio_snooze_until", 0.0))
-        except Exception:
-            pass
-    return 0.0
-
-
-def set_audio_snooze(minutes: int = 15) -> None:
-    """Disable audio/speaking exercises for N minutes (Duolingo app replica)."""
-    import time
-    ensure_config_dir()
-    snooze_until = time.time() + (minutes * 60)
-    data = {}
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            pass
-    data["audio_snooze_until"] = snooze_until
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-
-def is_audio_snoozed() -> bool:
-    """Check if audio/speaking exercises are currently snoozed."""
-    import time
-    return time.time() < get_audio_snooze_until()

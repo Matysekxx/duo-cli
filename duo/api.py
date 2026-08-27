@@ -22,22 +22,22 @@ TEXT_CHALLENGE_TYPES = [
     "match", "name", "orderTapComplete", "partialReverseTranslate",
     "patternTapComplete", "radioBinary", "radioImageSelect",
     "radioSelect", "readComprehension", "reverseAssist", "sameDifferent",
-    "select", "selectPronunciation", "selectTranscription", "svgPuzzle", "syllableTap",
+    "select", "svgPuzzle", "syllableTap",
     "tapCloze", "tapClozeTable", "tapComplete", "tapCompleteTable",
     "tapDescribe", "translate", "transliterate", "transliterationAssist", "typeCloze",
     "typeClozeTable", "typeComplete", "typeCompleteTable", "writeComprehension"
 ]
 
-ALL_CHALLENGE_TYPES = TEXT_CHALLENGE_TYPES + [
+# Audio / speaking challenge types are intentionally excluded: the terminal
+# client cannot present or capture them, so we only request text-based types.
+AUDIO_CHALLENGE_TYPES = {
     "listen", "listenComplete", "listenMatch", "listenComprehension", "listenIsolation",
     "listenSpeak", "listenTap", "partialListen", "radioListenMatch",
-    "radioListenRecognize", "syllableListenTap", "speak"
-]
+    "radioListenRecognize", "syllableListenTap", "speak",
+    "selectPronunciation", "selectTranscription",
+}
 
-# Request every challenge type Duolingo can serve. Audio/speaking types are
-# solved client-side and degraded to typed answers; purely visual types
-# (images, glyph puzzles) are skipped gracefully in the interactive session.
-CHALLENGE_TYPES = ALL_CHALLENGE_TYPES
+CHALLENGE_TYPES = [t for t in TEXT_CHALLENGE_TYPES if t not in AUDIO_CHALLENGE_TYPES]
 
 # Challenges where the learner arranges a word bank into the correct sentence.
 BUILD_SENTENCE_TYPES = {
@@ -48,6 +48,17 @@ BUILD_SENTENCE_TYPES = {
 # Cloze-style challenges with one or more blanks filled from a word bank.
 CLOZE_TYPES = {
     "gapFill", "tapCloze", "tapClozeTable", "typeCloze", "typeClozeTable",
+}
+
+# Challenges where the learner types the missing letters of a word.
+TYPE_COMPLETE_TYPES = {
+    "typeComplete", "typeCompleteTable",
+}
+
+# Types whose "choices"/"options" are the source sentence tokens (not answer
+# options). They must be solved as free text, never as multiple choice.
+FREE_TEXT_FAMILY = {
+    "translate",
 }
 
 LANGUAGE_FLAGS = {
@@ -150,7 +161,7 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
     answer_str = ""
     prompt = ""
 
-    if ctype in ["assist", "select", "characterSelect", "gapFill", "listenIsolation", "tapCloze", "tapClozeTable", "typeCloze", "typeClozeTable"]:
+    if ctype in ["assist", "select", "characterSelect", "gapFill", "tapCloze", "tapClozeTable", "typeCloze", "typeClozeTable"]:
         if raw_choices:
             for c in raw_choices:
                 if isinstance(c, str):
@@ -191,22 +202,6 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
             elif raw_prompt:
                 prompt = f"Fill in the blank: \"{raw_prompt}\""
 
-        elif ctype == "listenIsolation":
-            sentence_parts = []
-            if tokens:
-                b_start = ch.get("blankRangeStart", -1)
-                b_end = ch.get("blankRangeEnd", -1)
-                for t_idx, t in enumerate(tokens):
-                    if b_start <= t_idx <= b_end:
-                        if t_idx == b_start:
-                            sentence_parts.append("____")
-                    else:
-                        sentence_parts.append(t.get("value", ""))
-            sentence = "".join(sentence_parts) if sentence_parts else meta.get("text", "")
-            prompt = f"Select the missing word from listening:\n  \"{sentence}\""
-            if translation:
-                prompt += f"\n  [dim](Meaning: {translation})[/dim]"
-
         elif ctype == "assist":
             if raw_prompt:
                 prompt = f"Translate to Spanish: '{raw_prompt}'"
@@ -241,18 +236,46 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
                 elif solutions:
                     prompt = f"Fill in the blank (answer: {solutions[0]})"
 
-    elif ctype in ["translate", "listen", "listenTap", "listenComplete"]:
+    elif ctype == "translate":
         if solutions:
             answer_str = solutions[0]
         elif meta_word:
             answer_str = str(meta_word)
 
         if raw_prompt:
-            prompt = f"Translate: \"{raw_prompt}\""
+            prompt = f"✍️ Translate: \"{raw_prompt}\""
         elif display_tokens:
-            prompt = f"Translate: \"{''.join(t.get('text', '') for t in display_tokens)}\""
+            prompt = f"✍️ Translate: \"{''.join(t.get('text', '') for t in display_tokens)}\""
 
-    elif ctype in ["listenMatch", "match"]:
+    elif ctype in TYPE_COMPLETE_TYPES:
+        built = False
+        if display_tokens:
+            sentence_parts = []
+            in_blank = False
+            for t in display_tokens:
+                is_b = t.get("isBlank") or t.get("is_blank", False)
+                if is_b:
+                    if not in_blank:
+                        sentence_parts.append("____")
+                        in_blank = True
+                else:
+                    in_blank = False
+                    sentence_parts.append(t.get("text", ""))
+            if "____" in sentence_parts:
+                sentence = "".join(sentence_parts)
+                prompt = f"🔤 Type the missing letters:\n  [bold bright_white]{sentence}[/]"
+                if translation:
+                    prompt += f"\n  [dim](Meaning: {translation})[/dim]"
+                built = True
+        if not built:
+            if raw_prompt:
+                prompt = f"🔤 Type the word: \"{raw_prompt}\""
+            elif solutions:
+                prompt = f"🔤 Type the word (answer: {solutions[0]})"
+        if solutions:
+            answer_str = solutions[0]
+
+    elif ctype == "match":
         for p in pairs:
             lw = p.get("learningWord") or p.get("learning_word") or p.get("learningToken") or ""
             tr = p.get("translation") or p.get("fromToken") or ""
@@ -279,10 +302,6 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
         answer_str = solutions[0] if solutions else (meta_word or "")
         prompt = "Arrange the words to build the correct sentence"
 
-    elif ctype == "speak":
-        answer_str = raw_prompt
-        prompt = f"Repeat / Read: \"{raw_prompt}\""
-
     else:
         if solutions:
             answer_str = solutions[0]
@@ -291,13 +310,35 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
         if raw_prompt:
             prompt = raw_prompt
 
+    # Generic fallback: many MC-like types (radioSelect, judge, definition,
+    # name, form, ...) carry options/choices that should
+    # be surfaced as selectable answers instead of a free-text prompt.
+    # NOTE: for translate the "choices" are the source sentence
+    # tokens, NOT answer options, so it must stay free-text.
+    if (
+        not formatted_choices
+        and ctype not in BUILD_SENTENCE_TYPES
+        and ctype not in FREE_TEXT_FAMILY
+    ):
+        if raw_choices:
+            for c in raw_choices:
+                formatted_choices.append(c if isinstance(c, str) else c.get("text", ""))
+        elif options:
+            for opt in options:
+                formatted_choices.append(opt if isinstance(opt, str) else opt.get("text", ""))
+        if formatted_choices and not answer_str:
+            if correct_idx is not None and 0 <= correct_idx < len(formatted_choices):
+                answer_str = formatted_choices[correct_idx]
+            elif solutions:
+                answer_str = solutions[0]
+
     if not prompt:
         if raw_prompt:
             prompt = raw_prompt
         elif translation:
             prompt = f"Translate/Solve: (Meaning: {translation})"
         else:
-            prompt = f"Solve the challenge ({ctype})"
+            prompt = f"Solve this {ctype} challenge"
 
     if not answer_str and solutions:
         answer_str = solutions[0]

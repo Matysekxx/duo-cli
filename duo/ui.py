@@ -17,7 +17,6 @@ if sys.platform == "win32":
 
 from rich import box
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 
 from .api import get_flag
@@ -320,7 +319,6 @@ def render_help() -> None:
         ("STORE & SESSION", "Shop items, streak freeze, and settings", [
             ("shop", "Browse shop items and gem balances"),
             ("freeze", "Purchase & equip Streak Freeze (200 gems)"),
-            ("mute", "Snooze listening/speaking exercises (Flags: -m 15)"),
             ("switch <lang>", "Switch active learning course (e.g. duo switch es)"),
             ("login / logout", "Connect or disconnect Duolingo account"),
             ("shell", "Launch interactive Duo REPL shell")
@@ -403,6 +401,17 @@ def render_auto_summary(sessions_completed: int, total_xp: int, streak_days: int
     console.print()
 
 
+def _hearts_bar(hearts: int) -> str:
+    max_hearts = 5
+    return " ".join(
+        "[bold bright_red]♥[/]" if i < hearts else "[dim]♡[/]" for i in range(max_hearts)
+    )
+
+
+def _combo_badge(combo: int) -> str:
+    return f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
+
+
 def render_question_card(
     q_idx: int,
     total_q: int,
@@ -413,14 +422,8 @@ def render_question_card(
     lang_code: Optional[str],
     q_type: str = "",
 ) -> None:
-    """Render a single practice question as a beautiful Duolingo-style card."""
+    """Render a single practice question as a clean, borderless Duolingo-style card."""
     flag = get_flag(lang_code)
-    max_hearts = 5
-    hearts_bar = " ".join(
-        "[bold bright_red]♥[/]" if i < hearts else "[dim]♡[/]" for i in range(max_hearts)
-    )
-    combo_badge = f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
-
     type_label = ""
     if q_type:
         pretty = {
@@ -429,30 +432,20 @@ def render_question_card(
             "select": "Multiple Choice",
             "gapFill": "Fill the Blank",
             "match": "Matching",
-            "listen": "Listening",
-            "speak": "Speaking",
         }.get(q_type, q_type)
         type_label = f"  [dim]{pretty}[/]"
 
-    title = f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]{type_label}   {hearts_bar}{combo_badge}"
-
-    lines = [f"[bold bright_white]{prompt}[/]"]
-    if choices:
-        lines.append("")
-        for i, c in enumerate(choices, 1):
-            lines.append(f"  [bold bright_yellow]{i}.[/] [white]{c}[/]")
-
-    content = "\n".join(lines)
     console.print()
     console.print(
-        Panel(
-            content,
-            title=title,
-            border_style="bright_green",
-            padding=(1, 2),
-            expand=False,
-        )
+        f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]{type_label}"
+        f"   {_hearts_bar(hearts)}{_combo_badge(combo)}"
     )
+    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
+    console.print(f"  [bold bright_white]{prompt}[/]")
+    if choices:
+        for i, c in enumerate(choices, 1):
+            console.print(f"  [bold bright_yellow]{i}.[/] [white]{c}[/]")
+    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
 
 
 def render_freeform_card(
@@ -464,24 +457,18 @@ def render_freeform_card(
     lang_code: Optional[str],
     q_type: str = "",
 ) -> None:
-    """Render a free-text (typed) question as a clean card."""
+    """Render a free-text (typed) question as a clean, borderless card."""
     flag = get_flag(lang_code)
-    max_hearts = 5
-    hearts_bar = " ".join(
-        "[bold bright_red]♥[/]" if i < hearts else "[dim]♡[/]" for i in range(max_hearts)
-    )
-    combo_badge = f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
-    title = f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]   {hearts_bar}{combo_badge}"
     console.print()
     console.print(
-        Panel(
-            f"[bold bright_white]{prompt}[/]\n\n[dim]Type your answer below ↓[/]",
-            title=title,
-            border_style="bright_cyan",
-            padding=(1, 2),
-            expand=False,
-        )
+        f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]"
+        f"   {_hearts_bar(hearts)}{_combo_badge(combo)}"
     )
+    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
+    console.print(f"  [bold bright_white]{prompt}[/]")
+    console.print()
+    console.print("  [dim]✎ Type your answer below ↓[/]")
+    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
 
 
 def render_match_panel(
@@ -493,30 +480,18 @@ def render_match_panel(
     combo: int,
     lang_code: Optional[str],
 ) -> None:
-    """Render a single matching sub-round as a card."""
+    """Render a single matching sub-round as a clean, borderless card."""
     flag = get_flag(lang_code)
-    max_hearts = 5
-    hearts_bar = " ".join(
-        "[bold bright_red]♥[/]" if i < hearts else "[dim]♡[/]" for i in range(max_hearts)
-    )
-    combo_badge = f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
-    title = f"{flag} [bold bright_cyan]Match {p_idx}/{total_pairs}[/]   {hearts_bar}{combo_badge}"
-
-    lines = [f"[bold bright_yellow]{left_word}[/]  [dim]⇄ choose its translation below[/]"]
-    lines.append("")
-    for i, o in enumerate(options, 1):
-        lines.append(f"  [bold bright_yellow]{i}.[/] [white]{o}[/]")
-
     console.print()
     console.print(
-        Panel(
-            "\n".join(lines),
-            title=title,
-            border_style="bright_cyan",
-            padding=(1, 2),
-            expand=False,
-        )
+        f"{flag} [bold bright_cyan]Match {p_idx}/{total_pairs}[/]"
+        f"   {_hearts_bar(hearts)}{_combo_badge(combo)}"
     )
+    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
+    console.print(f"  [bold bright_yellow]{left_word}[/]  [dim]⇄ choose its translation below[/]")
+    for i, o in enumerate(options, 1):
+        console.print(f"  [bold bright_yellow]{i}.[/] [white]{o}[/]")
+    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
 
 
 def render_answer_result(is_correct: bool, correct_answer: str, gained_xp: int = 10) -> None:
@@ -543,27 +518,15 @@ def render_build_card(
 ) -> None:
     """Render a 'build the sentence' challenge with a numbered word bank."""
     flag = get_flag(lang_code)
-    max_hearts = 5
-    hearts_bar = " ".join(
-        "[bold bright_red]♥[/]" if i < hearts else "[dim]♡[/]" for i in range(max_hearts)
-    )
-    combo_badge = f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
-    title = f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]  [dim]Build Sentence[/]   {hearts_bar}{combo_badge}"
-
-    lines = [f"[bold bright_white]{prompt}[/]"]
-    lines.append("")
-    for i, w in enumerate(word_bank, 1):
-        lines.append(f"  [bold bright_yellow]{i}.[/] [white]{w}[/]")
-    lines.append("")
-    lines.append("[dim]Type the word numbers in order (e.g. 3 1 4 2) or type the sentence.[/]")
-
     console.print()
     console.print(
-        Panel(
-            "\n".join(lines),
-            title=title,
-            border_style="bright_magenta",
-            padding=(1, 2),
-            expand=False,
-        )
+        f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]  [dim]Build Sentence[/]"
+        f"   {_hearts_bar(hearts)}{_combo_badge(combo)}"
     )
+    console.print(f"[dim magenta]{DIVIDER_LINE}[/]")
+    console.print(f"  [bold bright_white]{prompt}[/]")
+    for i, w in enumerate(word_bank, 1):
+        console.print(f"  [bold bright_yellow]{i}.[/] [white]{w}[/]")
+    console.print()
+    console.print("  [dim]Type the word numbers in order (e.g. 3 1 4 2) or type the sentence.[/]")
+    console.print(f"[dim magenta]{DIVIDER_LINE}[/]")

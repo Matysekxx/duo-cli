@@ -20,7 +20,6 @@
 - ⚡ **Live Server Synchronization**: Syncs completed lessons and XP directly to official Duolingo servers in real-time, preserving your daily streak.
 - 🤖 **Automated Practice Engine (`auto`)**: Autonomous challenge solver using natural human-paced delays, target XP goals, and streak protection.
 - 🎮 **Gamified Terminal Quiz (`practice`)**: Legitimate interactive learning with smart sentence reconstruction (`____`), option shuffling, combo streaks, and a word-matching minigame.
-- 🔇 **15-Min Audio Snooze (`mute`)**: Replicates the mobile app's *"Can't listen/speak right now"* feature, disabling audio tasks for 15 minutes without penalty.
 - 🎨 **Modern Borderless TUI**: Custom horizontal divider system (`box.HORIZONTALS`) that never breaks on any font, encoding, or terminal emulator (PowerShell, Windows Terminal, iTerm2, Alacritty).
 - 📅 **14-Day Streak Visualizer**: Activity heatmap and daily XP progress breakdown.
 - 📚 **Course & Vocab Inspection**: View all enrolled language courses and inspect learned vocabulary with word strength ratings.
@@ -82,7 +81,6 @@ You will be prompted for:
 | `duo` / `duo status` | Display overview dashboard (streak, language, XP, gems) | |
 | `duo auto` | Solve practice lessons autonomously with human pauses | `-s, --sessions <N>`<br>`-g, --until-goal`<br>`-x, --target-xp <N>`<br>`--fast`<br>`-l, --lang <CODE>` |
 | `duo practice` | Start an interactive full lesson terminal session | `-l, --lang <CODE>` |
-| `duo mute` | Temporarily snooze listening & speaking exercises | `-m, --minutes <N>` *(default: 15)* |
 | `duo calendar` | View 14-day streak visualizer & XP history | `-d, --days <N>` |
 | `duo courses` | List all enrolled languages and total XP | |
 | `duo switch <lang>` | Switch your active learning language *(e.g. `duo switch es`)* | |
@@ -137,7 +135,6 @@ duo practice -l es
 - **Multiple Choice**: Type option number (`1`, `2`, `3`) or answer text.
 - **Word Matching**: Interactive step-by-step translation connector with option elimination.
 - **Skip Question**: Type `skip` or `s` to bypass a challenge.
-- **Mute Audio Exercises**: Type `cant-listen`, `cant-speak`, or `mute` to enable 15-minute audio snooze without losing hearts.
 - **Quit**: Type `exit` or `q` anytime to return to terminal.
 
 ---
@@ -163,8 +160,7 @@ duo shell
 ```json
 {
   "username": "your_username",
-  "jwt_token": "your_jwt_token",
-  "audio_snooze_until": 0
+  "jwt_token": "your_jwt_token"
 }
 ```
 

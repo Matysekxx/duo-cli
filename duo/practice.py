@@ -8,11 +8,10 @@ from typing import Any, Dict, List, Optional
 from rich.prompt import Prompt
 
 from .api import DuoClient, extract_challenge_solution, get_flag
-from .config import is_audio_snoozed, set_audio_snooze
 
-# Types whose answer depends on images / glyph drawing / audio waveform that a
-# terminal cannot present. They are auto-completed in the interactive session
-# until proper support is added.
+# Types whose answer depends on images / glyph drawing that a terminal cannot
+# present. They are auto-completed in the interactive session until proper
+# support is added.
 VISUAL_CHALLENGE_TYPES = {
     "radioImageSelect",
     "characterIntro",
@@ -22,7 +21,6 @@ VISUAL_CHALLENGE_TYPES = {
     "characterTrace",
     "characterWrite",
     "svgPuzzle",
-    "selectPronunciation",
 }
 from .ui import (
     DIVIDER_LINE,
@@ -41,45 +39,6 @@ from .ui import (
     render_match_panel,
     render_question_card,
 )
-
-CURATED_CHALLENGES = {
-    "es": [
-        {"prompt": "Translate to Spanish: 'The cat drinks milk'", "answer": "el gato bebe leche", "wrong": ["el perro come pan", "el niño bebe agua", "el gato come queso"]},
-        {"prompt": "What does 'Gracias' mean?", "answer": "thank you", "wrong": ["please", "good morning", "goodbye"]},
-        {"prompt": "Translate: 'Buenos días'", "answer": "good morning", "wrong": ["good night", "hello", "see you"]},
-        {"prompt": "Translate: 'Water'", "answer": "agua", "wrong": ["leche", "vino", "pan"]},
-        {"prompt": "Translate: 'Por favor'", "answer": "please", "wrong": ["thank you", "excuse me", "you're welcome"]},
-        {"prompt": "Translate: 'The boy reads a book'", "answer": "el niño lee un libro", "wrong": ["la niña come una manzana", "el hombre bebe vino", "el niño escribe una carta"]},
-        {"prompt": "What is 'Bread' in Spanish?", "answer": "pan", "wrong": ["manzana", "agua", "queso"]},
-        {"prompt": "Translate: 'Buenas noches'", "answer": "good night", "wrong": ["good morning", "good afternoon", "welcome"]},
-    ],
-    "de": [
-        {"prompt": "Translate: 'Guten Morgen'", "answer": "good morning", "wrong": ["good night", "hello", "goodbye"]},
-        {"prompt": "What does 'Danke' mean?", "answer": "thank you", "wrong": ["please", "sorry", "yes"]},
-        {"prompt": "Translate: 'Cat'", "answer": "katze", "wrong": ["hund", "vogel", "pferd"]},
-        {"prompt": "Translate: 'Water and bread'", "answer": "wasser und brot", "wrong": ["milch und käse", "tee und kaffee", "bier und wein"]},
-        {"prompt": "Translate: 'Auf Wiedersehen'", "answer": "goodbye", "wrong": ["see you later", "welcome", "please"]},
-        {"prompt": "Translate: 'The woman is drinking'", "answer": "die frau trinkt", "wrong": ["der mann isst", "das kind schläft", "die frau liest"]},
-    ],
-    "en": [
-        {"prompt": "Translate: 'Hello'", "answer": "hello", "wrong": ["good night", "goodbye", "welcome"]},
-        {"prompt": "Translate: 'Thank you'", "answer": "thank you", "wrong": ["please", "sorry", "welcome"]},
-        {"prompt": "What is 'Apple'?", "answer": "apple", "wrong": ["bread", "water", "milk"]},
-        {"prompt": "Translate: 'Good morning'", "answer": "good morning", "wrong": ["good night", "good afternoon", "bye"]},
-    ],
-    "fr": [
-        {"prompt": "Translate: 'Bonjour'", "answer": "hello", "wrong": ["goodbye", "please", "thank you"]},
-        {"prompt": "Translate: 'Merci'", "answer": "thank you", "wrong": ["please", "sorry", "yes"]},
-        {"prompt": "What is 'The cat' in French?", "answer": "le chat", "wrong": ["le chien", "le cheval", "l'oiseau"]},
-        {"prompt": "Translate: 'Un croissant, s'il vous plaît'", "answer": "a croissant please", "wrong": ["a coffee please", "two baguettes", "thank you very much"]},
-    ],
-    "cs": [
-        {"prompt": "Translate: 'Ahoj'", "answer": "hello", "wrong": ["goodbye", "thank you", "please"]},
-        {"prompt": "Translate: 'Děkuji'", "answer": "thank you", "wrong": ["please", "good morning", "sorry"]},
-        {"prompt": "What is 'Water' in Czech?", "answer": "voda", "wrong": ["chléb", "mléko", "pivo"]},
-        {"prompt": "Translate: 'Dobré ráno'", "answer": "good morning", "wrong": ["good night", "good afternoon", "goodbye"]},
-    ],
-}
 
 
 def normalize_answer(text: str) -> str:
@@ -120,25 +79,23 @@ class PracticeSession:
         if live_challenges:
             questions = live_challenges
         else:
-            pool = CURATED_CHALLENGES.get(self.lang_code, CURATED_CHALLENGES.get("es", []))
-            questions = []
-            for item in pool:
-                all_choices = [item["answer"]] + item.get("wrong", [])
-                random.shuffle(all_choices)
-                questions.append({
-                    "type": "multiple_choice",
-                    "prompt": item["prompt"],
-                    "choices": all_choices,
-                    "answer": item["answer"],
-                    "solutions": [item["answer"]],
-                })
+            print_warning(
+                "No practice questions available. Run 'duo login' to fetch live "
+                "Duolingo challenges for your course."
+            )
+            return
 
         console.print()
         console.print("[bold bright_green]🦉 DUOLINGO PRACTICE SESSION[/]")
         console.print(f"[dim green]{DIVIDER_LINE}[/]")
         console.print(f"  Language  : [bold bright_cyan]{self.lang_code.upper()}[/] | Questions: [bold yellow]{len(questions)}[/] | Hearts: [bold red]{self.hearts}/5[/]")
         console.print(f"  User      : [bold bright_white]@{self.client.username or 'guest'}[/]")
-        console.print("  [dim]Type choice (1..N), enter answer, 'skip' to skip, or 'exit' to quit.[/]")
+        console.print()
+        console.print("  [dim]How to play:[/]")
+        console.print("    • [white]Multiple choice[/] → type the [bold yellow]number[/] of your answer")
+        console.print("    • [white]Translate[/] → type the translation")
+        console.print("    • [white]Build sentence[/] → type word [bold yellow]numbers[/] in order (e.g. [yellow]3 1 4 2[/]) or the sentence")
+        console.print("    • [white]skip[/] to skip a question · [white]exit[/] to quit")
         console.print(f"[dim green]{DIVIDER_LINE}[/]\n")
 
         for idx, q in enumerate(questions, 1):
@@ -147,20 +104,8 @@ class PracticeSession:
                 break
 
             q_type = q.get("type", "")
-            if is_audio_snoozed() and q_type in ["speak", "listenSpeak", "listen", "listenTap", "listenComplete", "listenIsolation", "listenMatch", "partialListen"]:
-                console.print(f"\n[dim yellow]🔇 Audio/Speaking exercise snoozed for 15 min. Auto-completed! ✔[/dim yellow]")
-                self.score += 1
-                time.sleep(0.3)
-                continue
-
-            if q_type in ["speak", "listenSpeak"]:
-                console.print(f"\n[dim yellow]🎤 Audio/Speaking exercise auto-skipped for terminal. Marked correct! ✔[/dim yellow]")
-                self.score += 1
-                time.sleep(0.3)
-                continue
-
             if q_type in VISUAL_CHALLENGE_TYPES:
-                console.print(f"\n[dim yellow]🖼️ Visual/Audio exercise ('{q_type}') can't be shown in terminal. Auto-completed! ✔[/dim yellow]")
+                console.print(f"\n[dim yellow]🖼️ Visual exercise ('{q_type}') can't be shown in terminal. Auto-completed! ✔[/dim yellow]")
                 self.score += 1
                 time.sleep(0.3)
                 continue
@@ -181,12 +126,6 @@ class PracticeSession:
                     break
                 if user_input.lower() in ["skip", "s"]:
                     console.print("[dim yellow]⏭ Question skipped.[/dim yellow]")
-                    continue
-                if user_input.lower() in ["cant-listen", "cant-speak", "no-audio", "mute", "cant", "nemuzu", "snooze"]:
-                    set_audio_snooze(15)
-                    console.print("\n[bold yellow]🔇 'Can't listen/speak right now' enabled for 15 minutes![/]")
-                    self.score += 1
-                    time.sleep(0.4)
                     continue
 
                 # Accept either an ordered list of word numbers or a typed sentence
@@ -224,11 +163,6 @@ class PracticeSession:
                         console.print("[dim yellow]⏭ Matching question skipped.[/dim yellow]")
                         matched_all = True
                         break
-                    if ans.lower() in ["cant-listen", "cant-speak", "no-audio", "mute", "cant", "nemuzu", "snooze"]:
-                        set_audio_snooze(15)
-                        console.print("\n[bold yellow]🔇 'Can't listen/speak right now' enabled for 15 minutes![/]")
-                        matched_all = True
-                        break
 
                     picked = None
                     if ans.isdigit() and 1 <= int(ans) <= len(remaining_right):
@@ -260,13 +194,6 @@ class PracticeSession:
                     break
                 if user_input.lower() in ["skip", "s"]:
                     console.print("[dim yellow]⏭ Question skipped.[/dim yellow]")
-                    continue
-                if user_input.lower() in ["cant-listen", "cant-speak", "no-audio", "mute", "cant", "nemuzu", "snooze"]:
-                    set_audio_snooze(15)
-                    console.print("\n[bold yellow]🔇 'Can't listen/speak right now' enabled for 15 minutes![/]")
-                    console.print("[dim]Listening and speaking exercises turned off for the next 15 minutes.[/dim]")
-                    self.score += 1
-                    time.sleep(0.4)
                     continue
 
                 is_correct = False

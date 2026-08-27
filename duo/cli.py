@@ -18,7 +18,7 @@ import click
 from rich.prompt import Prompt
 
 from .api import DuoAPIError, DuoClient
-from .config import clear_config, get_jwt, get_username, is_authenticated, set_audio_snooze, set_credentials
+from .config import clear_config, get_jwt, get_username, is_authenticated, set_credentials
 from .practice import AutoPractice, PracticeSession
 from .ui import (
     DIVIDER_LINE,
@@ -231,14 +231,6 @@ def freeze_cmd() -> None:
         print_error(f"Purchase failed: {e}")
 
 
-@cli.command("mute")
-@click.option("--minutes", "-m", default=15, help="Minutes to disable listening/speaking (default: 15)")
-def mute_cmd(minutes: int) -> None:
-    """Disable listening and speaking exercises for N minutes (like Duolingo app)."""
-    set_audio_snooze(minutes)
-    print_success(f"🔇 'Can't listen or speak right now' enabled for {minutes} minutes!")
-
-
 @cli.command("vocab")
 @click.option("--lang", "-l", help="Language code filter (e.g. es, de, fr)")
 @click.option("--limit", "-n", default=30, help="Maximum number of words to show")
@@ -360,7 +352,6 @@ def shell_cmd() -> None:
         "quests": quests_cmd,
         "shop": shop_cmd,
         "freeze": freeze_cmd,
-        "mute": mute_cmd,
         "switch": switch_cmd,
         "vocab": vocab_cmd,
         "profile": profile_cmd,
