@@ -529,3 +529,41 @@ def render_answer_result(is_correct: bool, correct_answer: str, gained_xp: int =
         console.print(
             f"\n[bold bright_red]✖ Incorrect![/] [dim]Correct answer:[/] [bold green]{correct_answer}[/]"
         )
+
+
+def render_build_card(
+    q_idx: int,
+    total_q: int,
+    prompt: str,
+    word_bank: List[str],
+    hearts: int,
+    combo: int,
+    lang_code: Optional[str],
+    q_type: str = "",
+) -> None:
+    """Render a 'build the sentence' challenge with a numbered word bank."""
+    flag = get_flag(lang_code)
+    max_hearts = 5
+    hearts_bar = " ".join(
+        "[bold bright_red]♥[/]" if i < hearts else "[dim]♡[/]" for i in range(max_hearts)
+    )
+    combo_badge = f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
+    title = f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]  [dim]Build Sentence[/]   {hearts_bar}{combo_badge}"
+
+    lines = [f"[bold bright_white]{prompt}[/]"]
+    lines.append("")
+    for i, w in enumerate(word_bank, 1):
+        lines.append(f"  [bold bright_yellow]{i}.[/] [white]{w}[/]")
+    lines.append("")
+    lines.append("[dim]Type the word numbers in order (e.g. 3 1 4 2) or type the sentence.[/]")
+
+    console.print()
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title=title,
+            border_style="bright_magenta",
+            padding=(1, 2),
+            expand=False,
+        )
+    )

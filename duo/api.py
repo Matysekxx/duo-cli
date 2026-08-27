@@ -34,7 +34,21 @@ ALL_CHALLENGE_TYPES = TEXT_CHALLENGE_TYPES + [
     "radioListenRecognize", "syllableListenTap", "speak"
 ]
 
-CHALLENGE_TYPES = TEXT_CHALLENGE_TYPES
+# Request every challenge type Duolingo can serve. Audio/speaking types are
+# solved client-side and degraded to typed answers; purely visual types
+# (images, glyph puzzles) are skipped gracefully in the interactive session.
+CHALLENGE_TYPES = ALL_CHALLENGE_TYPES
+
+# Challenges where the learner arranges a word bank into the correct sentence.
+BUILD_SENTENCE_TYPES = {
+    "orderTapComplete", "patternTapComplete", "syllableTap",
+    "tapComplete", "tapCompleteTable",
+}
+
+# Cloze-style challenges with one or more blanks filled from a word bank.
+CLOZE_TYPES = {
+    "gapFill", "tapCloze", "tapClozeTable", "typeCloze", "typeClozeTable",
+}
 
 LANGUAGE_FLAGS = {
     "en": "🇬🇧",
@@ -132,10 +146,11 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
     formatted_choices: List[str] = []
     pair_strings: List[str] = []
     pair_tuples: List[tuple] = []
+    word_bank: List[str] = []
     answer_str = ""
     prompt = ""
 
-    if ctype in ["assist", "select", "characterSelect", "gapFill", "listenIsolation"]:
+    if ctype in ["assist", "select", "characterSelect", "gapFill", "listenIsolation", "tapCloze", "tapClozeTable", "typeCloze", "typeClozeTable"]:
         if raw_choices:
             for c in raw_choices:
                 if isinstance(c, str):
@@ -200,6 +215,32 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
             if raw_prompt:
                 prompt = f"Select the correct option for: '{raw_prompt}'"
 
+        elif ctype in ["tapCloze", "tapClozeTable", "typeCloze", "typeClozeTable"]:
+            built = False
+            if display_tokens:
+                sentence_parts = []
+                in_blank = False
+                for t in display_tokens:
+                    is_b = t.get("isBlank") or t.get("is_blank", False)
+                    if is_b:
+                        if not in_blank:
+                            sentence_parts.append("____")
+                            in_blank = True
+                    else:
+                        in_blank = False
+                        sentence_parts.append(t.get("text", ""))
+                if "____" in sentence_parts:
+                    sentence = "".join(sentence_parts)
+                    prompt = f"Fill in the blank:\n  \"{sentence}\""
+                    if translation:
+                        prompt += f"\n  [dim](Meaning: {translation})[/dim]"
+                    built = True
+            if not built:
+                if raw_prompt:
+                    prompt = f"Fill in the blank: \"{raw_prompt}\""
+                elif solutions:
+                    prompt = f"Fill in the blank (answer: {solutions[0]})"
+
     elif ctype in ["translate", "listen", "listenTap", "listenComplete"]:
         if solutions:
             answer_str = solutions[0]
@@ -220,6 +261,23 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
                 pair_strings.append(f"{lw} ⇄ {tr}")
         answer_str = ", ".join(pair_strings)
         prompt = "Match the following pairs"
+
+    elif ctype in BUILD_SENTENCE_TYPES:
+        word_bank = []
+        for t in (tokens or display_tokens):
+            if isinstance(t, dict):
+                word_bank.append(t.get("value") or t.get("text") or t.get("token") or "")
+            elif isinstance(t, str):
+                word_bank.append(t)
+        word_bank = [w for w in word_bank if w]
+        if not word_bank and raw_choices:
+            for c in raw_choices:
+                word_bank.append(c if isinstance(c, str) else c.get("text", ""))
+        if not word_bank and options:
+            for opt in options:
+                word_bank.append(opt if isinstance(opt, str) else opt.get("text", ""))
+        answer_str = solutions[0] if solutions else (meta_word or "")
+        prompt = "Arrange the words to build the correct sentence"
 
     elif ctype == "speak":
         answer_str = raw_prompt
@@ -250,6 +308,7 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
         "choices": formatted_choices,
         "pairs": pair_strings,
         "pair_tuples": pair_tuples,
+        "word_bank": word_bank,
         "answer": answer_str or "OK",
         "solutions": solutions,
         "raw": ch

@@ -9,6 +9,21 @@ from rich.prompt import Prompt
 
 from .api import DuoClient, extract_challenge_solution, get_flag
 from .config import is_audio_snoozed, set_audio_snooze
+
+# Types whose answer depends on images / glyph drawing / audio waveform that a
+# terminal cannot present. They are auto-completed in the interactive session
+# until proper support is added.
+VISUAL_CHALLENGE_TYPES = {
+    "radioImageSelect",
+    "characterIntro",
+    "characterMatch",
+    "characterPuzzle",
+    "characterSelect",
+    "characterTrace",
+    "characterWrite",
+    "svgPuzzle",
+    "selectPronunciation",
+}
 from .ui import (
     DIVIDER_LINE,
     console,
@@ -21,6 +36,7 @@ from .ui import (
     render_auto_header,
     render_auto_session_result,
     render_auto_summary,
+    render_build_card,
     render_freeform_card,
     render_match_panel,
     render_question_card,
@@ -143,14 +159,53 @@ class PracticeSession:
                 time.sleep(0.3)
                 continue
 
+            if q_type in VISUAL_CHALLENGE_TYPES:
+                console.print(f"\n[dim yellow]🖼️ Visual/Audio exercise ('{q_type}') can't be shown in terminal. Auto-completed! ✔[/dim yellow]")
+                self.score += 1
+                time.sleep(0.3)
+                continue
+
             prompt_text = q.get("prompt", "")
             correct_raw = q.get("answer", "")
             solutions = [normalize_answer(s) for s in q.get("solutions", [])] if q.get("solutions") else [normalize_answer(correct_raw)]
 
             pair_tuples = q.get("pair_tuples", [])
             choices = q.get("choices", [])
+            word_bank = q.get("word_bank", [])
 
-            if pair_tuples and len(pair_tuples) > 1:
+            if word_bank:
+                render_build_card(idx, len(questions), prompt_text, word_bank, self.hearts, self.combo, self.lang_code, q_type)
+
+                user_input = Prompt.ask(f"\n[bold bright_green]Your sentence[/]").strip()
+                if user_input.lower() in ["exit", "quit", "q"]:
+                    break
+                if user_input.lower() in ["skip", "s"]:
+                    console.print("[dim yellow]⏭ Question skipped.[/dim yellow]")
+                    continue
+                if user_input.lower() in ["cant-listen", "cant-speak", "no-audio", "mute", "cant", "nemuzu", "snooze"]:
+                    set_audio_snooze(15)
+                    console.print("\n[bold yellow]🔇 'Can't listen/speak right now' enabled for 15 minutes![/]")
+                    self.score += 1
+                    time.sleep(0.4)
+                    continue
+
+                # Accept either an ordered list of word numbers or a typed sentence
+                parts = user_input.split()
+                if parts and all(p.isdigit() for p in parts):
+                    picked_words = [
+                        word_bank[int(p) - 1]
+                        for p in parts
+                        if p.isdigit() and 1 <= int(p) <= len(word_bank)
+                    ]
+                    constructed = " ".join(picked_words)
+                else:
+                    constructed = user_input
+
+                is_correct = (
+                    normalize_answer(constructed) in solutions
+                    or normalize_answer(constructed) == normalize_answer(correct_raw)
+                )
+            elif pair_tuples and len(pair_tuples) > 1:
                 remaining_right = [p[1] for p in pair_tuples]
                 random.shuffle(remaining_right)
 
