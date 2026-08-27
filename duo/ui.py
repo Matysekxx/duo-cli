@@ -301,7 +301,7 @@ def render_help() -> None:
 
     sections = [
         ("AUTOMATION", "Auto-solve & interactive practice", [
-            ("auto", "Automate practice lessons with natural pauses (Flags: -s, -g, -x, -L, --fast)"),
+            ("auto", "Automate practice lessons with natural pauses (Flags: -s, -g, -x, -L, -m, --fast)"),
             ("practice", "Interactive full lesson practice session in terminal (Flags: -l)")
         ]),
         ("STATS & PROGRESS", "Streak, courses, and quests", [
@@ -334,7 +334,7 @@ def render_help() -> None:
     console.print("[dim cyan]──────────────────────────────────────────────────────────────────[/]")
     console.print("  [bright_green]duo[/]                    Show status dashboard")
     console.print("  [bright_green]duo auto -g[/]            Complete daily goal automatically")
-    console.print("  [bright_green]duo auto -L[/]            Run practice sessions forever (Ctrl+C to stop)")
+    console.print("  [bright_green]duo auto -L -m 20[/]       Run up to 20 sessions then stop (safer than endless -L)")
     console.print("  [bright_green]duo practice -l es[/]     Interactive Spanish lesson")
     console.print("  [bright_green]duo switch de[/]          Switch course to German")
     console.print("  [bright_green]duo shell[/]               Enter interactive shell")

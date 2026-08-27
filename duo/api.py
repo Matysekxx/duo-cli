@@ -817,7 +817,7 @@ class DuoClient:
             "endTime": end_ts,
             "enableBonusPoints": True,
             "failed": bool(failed),
-            "maxInLessonStreak": max(score, 5),
+            "maxInLessonStreak": min(max(score, 1), 9),
             "shouldLearnThings": True
         }
 

@@ -322,6 +322,7 @@ def practice_cmd(lang: Optional[str]) -> None:
 @click.option("--delay-min", default=1.2, type=float, help="Minimum delay between questions in seconds (default: 1.2)")
 @click.option("--delay-max", default=2.8, type=float, help="Maximum delay between questions in seconds (default: 2.8)")
 @click.option("--fast", is_flag=True, help="Fast mode with reduced delays (~0.3s - 0.7s)")
+@click.option("--max-sessions", "-m", default=None, type=int, help="Hard cap on number of sessions (recommended with -L to avoid bans)")
 def auto_cmd(
     sessions: int,
     target_xp: Optional[int],
@@ -331,11 +332,17 @@ def auto_cmd(
     delay_min: float,
     delay_max: float,
     fast: bool,
+    max_sessions: Optional[int],
 ) -> None:
     """Automate Duolingo practice sessions with natural delays to earn XP and keep streak."""
     if not is_authenticated():
         print_error("Not authenticated. Run 'duo login'.")
         return
+    if loop:
+        print_warning(
+            "[bold yellow]⚠ Endless auto (-L) can look like botting to Duolingo and risks a ban. "
+            "Use -m/--max-sessions to set a limit.[/]"
+        )
     client = DuoClient()
     bot = AutoPractice(
         client=client,
@@ -343,6 +350,7 @@ def auto_cmd(
         delay_min=delay_min,
         delay_max=delay_max,
         fast=fast,
+        max_sessions=max_sessions,
     )
     bot.run(sessions=sessions, target_xp=target_xp, until_goal=until_goal, loop=loop)
 
@@ -419,6 +427,7 @@ def shell_cmd() -> None:
                         sessions = 1
                         target_xp = None
                         lang = None
+                        max_sessions = None
 
                         for i, a in enumerate(args):
                             if a in ["-s", "--sessions"] and i + 1 < len(args) and args[i + 1].isdigit():
@@ -427,8 +436,10 @@ def shell_cmd() -> None:
                                 target_xp = int(args[i + 1])
                             elif a in ["-l", "--lang"] and i + 1 < len(args):
                                 lang = args[i + 1]
+                            elif a in ["-m", "--max-sessions"] and i + 1 < len(args) and args[i + 1].isdigit():
+                                max_sessions = int(args[i + 1])
 
-                        ctx.invoke(cmd_map[cmd_name], sessions=sessions, target_xp=target_xp, until_goal=until_goal, loop=loop, lang=lang, fast=fast)
+                        ctx.invoke(cmd_map[cmd_name], sessions=sessions, target_xp=target_xp, until_goal=until_goal, loop=loop, lang=lang, fast=fast, max_sessions=max_sessions)
                     elif cmd_name == "switch" and args:
                         ctx.invoke(cmd_map[cmd_name], language_code=args[0])
                     else:

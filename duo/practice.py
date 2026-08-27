@@ -279,10 +279,12 @@ class AutoPractice:
         delay_min: float = 1.2,
         delay_max: float = 2.8,
         fast: bool = False,
+        max_sessions: Optional[int] = None,
     ):
         self.client = client
         self.lang_code = lang_code
         self.fast = fast
+        self.max_sessions = max_sessions
         if fast:
             self.delay_min = 0.3
             self.delay_max = 0.7
@@ -300,6 +302,15 @@ class AutoPractice:
         if not self.client.is_authenticated():
             print_error("Automated practice requires authentication. Run 'duo login' first.")
             return
+
+        # Safety: unbounded looping (auto -L) looks like botting to Duolingo.
+        # Apply a default cap and warn unless the user set an explicit limit.
+        if loop and not self.max_sessions:
+            self.max_sessions = 25
+            print_warning(
+                "[bold yellow]⚠ Running forever (-L) is ban-prone. Capping this run to "
+                f"{self.max_sessions} sessions. Use -m/--max-sessions to choose your own limit.[/]"
+            )
 
         # Fetch initial user status
         try:
@@ -329,6 +340,12 @@ class AutoPractice:
             session_num = 0
             while True:
                 session_num += 1
+                # Hard stop for the safety cap (even in loop mode)
+                if self.max_sessions and sessions_completed >= self.max_sessions:
+                    console.print(
+                        f"[bold bright_green]🛑 Reached session limit ({self.max_sessions}). Stopping.[/]\n"
+                    )
+                    break
                 # Check stopping conditions (loop mode never stops on its own)
                 if not loop:
                     if until_goal and (initial_xp_today + total_xp_earned) >= daily_goal:
@@ -377,6 +394,9 @@ class AutoPractice:
 
                     # Calculate pause
                     pause = random.uniform(self.delay_min, self.delay_max)
+                    # Occasionally "think" a bit longer, like a human would
+                    if random.random() < 0.12:
+                        pause += random.uniform(1.5, 4.0)
                     render_auto_challenge(
                         session_idx=session_num,
                         total_sessions=0 if loop else (sessions if (not until_goal and not target_xp) else 0),
@@ -425,13 +445,18 @@ class AutoPractice:
                         should_continue = False
 
                 if should_continue:
-                    # Occasional longer "coffee break" in infinite loop mode to stay safe
-                    if loop and sessions_completed > 0 and sessions_completed % 5 == 0:
-                        rest_pause = random.uniform(30.0, 60.0)
-                        console.print(f"[dim]⏳ Long break for {rest_pause:.0f}s (every 5 sessions in loop mode)...[/]\n")
+                    # Human-like pacing between sessions to avoid bot-like
+                    # regularity. Longer randomized gaps + occasional long breaks.
+                    if self.fast:
+                        rest_pause = random.uniform(4.0, 10.0)
+                    elif loop and sessions_completed > 0 and sessions_completed % 5 == 0:
+                        rest_pause = random.uniform(45.0, 120.0)
                     else:
-                        rest_pause = random.uniform(2.0, 3.5) if not self.fast else 0.8
-                        console.print(f"[dim]⏳ Resting for {rest_pause:.1f}s before next session...[/]\n")
+                        rest_pause = random.uniform(12.0, 35.0)
+                        # Occasionally throw in an extra-long "coffee break"
+                        if random.random() < 0.1:
+                            rest_pause = random.uniform(60.0, 180.0)
+                    console.print(f"[dim]⏳ Resting for {rest_pause:.0f}s before next session...[/]\n")
                     time.sleep(rest_pause)
 
         except KeyboardInterrupt:

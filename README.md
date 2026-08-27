@@ -17,8 +17,10 @@
 
 ## ✨ Features
 
-- ⚡ **Live Server Synchronization**: Syncs completed lessons and XP directly to official Duolingo servers in real-time, preserving your daily streak.
-- 🤖 **Automated Practice Engine (`auto`)**: Autonomous challenge solver using natural human-paced delays, target XP goals, and streak protection.
+- ⚡ **Live Server Synchronization**: Syncs completed lessons and XP directly to official Duolingo servers, preserving your daily streak. Real heart/energy state is read from and written back to the server (no silent refills).
+- 🤖 **Automated Practice Engine (`auto`)**: Autonomous challenge solver using natural human-paced delays, target XP goals, streak protection, and an **infinite `-L` loop mode**.
+- 🛡️ **Ban-Safe Automation**: `auto` uses human-like randomized pacing plus long random "coffee breaks", and a hard session cap (`-m`) to avoid bot detection. `-L` without `-m` auto-caps at 25 sessions with a warning.
+- 🌐 **Persistent Language Preset**: `duo switch` saves your active course locally, so `practice`/`auto` remember it (no more hard-coded `es`).
 - 🎮 **Gamified Terminal Quiz (`practice`)**: Legitimate interactive learning with smart sentence reconstruction (`____`), option shuffling, combo streaks, and a word-matching minigame.
 - 🎨 **Modern Borderless TUI**: Custom horizontal divider system (`box.HORIZONTALS`) that never breaks on any font, encoding, or terminal emulator (PowerShell, Windows Terminal, iTerm2, Alacritty).
 - 📅 **14-Day Streak Visualizer**: Activity heatmap and daily XP progress breakdown.
@@ -79,11 +81,11 @@ You will be prompted for:
 | Command | Description | Flags & Options |
 |---|---|---|
 | `duo` / `duo status` | Display overview dashboard (streak, language, XP, gems) | |
-| `duo auto` | Solve practice lessons autonomously with human pauses | `-s, --sessions <N>`<br>`-g, --until-goal`<br>`-x, --target-xp <N>`<br>`--fast`<br>`-l, --lang <CODE>` |
+| `duo auto` | Solve practice lessons autonomously with human pauses | `-s, --sessions <N>`<br>`-g, --until-goal`<br>`-x, --target-xp <N>`<br>`-L, --loop`<br>`-m, --max-sessions <N>`<br>`--fast`<br>`-l, --lang <CODE>` |
 | `duo practice` | Start an interactive full lesson terminal session | `-l, --lang <CODE>` |
 | `duo calendar` | View 14-day streak visualizer & XP history | `-d, --days <N>` |
 | `duo courses` | List all enrolled languages and total XP | |
-| `duo switch <lang>` | Switch your active learning language *(e.g. `duo switch es`)* | |
+| `duo switch <lang>` | Switch active course & save it as local preset *(e.g. `duo switch es`)* | |
 | `duo quests` | Inspect daily quests, goals, and milestones | |
 | `duo shop` | Browse items, prices, and equipped streak freezes | |
 | `duo freeze` | Purchase and equip a Streak Freeze (200 gems) | |
@@ -115,7 +117,15 @@ duo auto -s 3 --fast
 
 # Practice a specific language:
 duo auto -l de -s 2
+
+# Infinite loop mode (until Ctrl+C) — capped automatically at 25 sessions:
+duo auto -L
+
+# Loop mode with an explicit, safer cap:
+duo auto -L -m 20
 ```
+
+> ⚠️ **Ban safety:** Endless automation (`-L`) can look like botting to Duolingo. Always prefer a session cap (`-m`). `auto` already randomizes pacing, inserts long random "coffee breaks", and caps `maxInLessonStreak` to realistic values to stay under the radar.
 
 ---
 
@@ -134,7 +144,6 @@ duo practice -l es
 ### In-Quiz Controls:
 - **Multiple Choice**: Type option number (`1`, `2`, `3`) or answer text.
 - **Word Matching**: Interactive step-by-step translation connector with option elimination.
-- **Skip Question**: Type `skip` or `s` to bypass a challenge.
 - **Quit**: Type `exit` or `q` anytime to return to terminal.
 
 ---
