@@ -26,8 +26,6 @@ from .ui import (
     DIVIDER_LINE,
     console,
     print_error,
-    print_info,
-    print_success,
     print_warning,
     render_answer_result,
     render_auto_challenge,
