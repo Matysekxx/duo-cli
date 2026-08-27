@@ -1,6 +1,7 @@
 """Tests for challenge parsing and normalization in duo.api."""
 
 import unittest
+from unittest import mock
 
 from duo.api import (
     AUDIO_CHALLENGE_TYPES,
@@ -136,6 +137,47 @@ class TestExtractUnknown(unittest.TestCase):
             "correctSolutions": ["ok"],
         })
         self.assertIn("someFutureType", r["prompt"])
+
+
+class FakeClient:
+    """Stand-in for DuoClient that only provides get_learning_language."""
+    def __init__(self, lang):
+        self._lang = lang
+
+    def get_learning_language(self):
+        return self._lang
+
+
+class TestLanguageResolution(unittest.TestCase):
+    @mock.patch("duo.practice.get_preset_language", return_value=None)
+    def test_practice_respects_server_language_when_not_given(self, _mock_preset):
+        from duo.practice import PracticeSession
+
+        # No -l flag -> should use the active course from the server, not "es".
+        s = PracticeSession(FakeClient("fr"), None)
+        self.assertEqual(s.lang_code, "fr")
+
+    @mock.patch("duo.practice.get_preset_language", return_value=None)
+    def test_practice_explicit_flag_wins(self, _mock_preset):
+        from duo.practice import PracticeSession
+
+        s = PracticeSession(FakeClient("fr"), "de")
+        self.assertEqual(s.lang_code, "de")
+
+    @mock.patch("duo.practice.get_preset_language", return_value=None)
+    def test_practice_falls_back_to_es_without_server_lang(self, _mock_preset):
+        from duo.practice import PracticeSession
+
+        s = PracticeSession(FakeClient(None), None)
+        self.assertEqual(s.lang_code, "es")
+
+    @mock.patch("duo.practice.get_preset_language", return_value="ja")
+    def test_practice_uses_local_preset_over_server(self, _mock_preset):
+        from duo.practice import PracticeSession
+
+        # Local preset wins over the server's reported language.
+        s = PracticeSession(FakeClient("fr"), None)
+        self.assertEqual(s.lang_code, "ja")
 
 
 if __name__ == "__main__":

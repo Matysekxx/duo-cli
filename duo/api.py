@@ -424,6 +424,15 @@ class DuoClient:
         self._cached_user_data = users[0]
         return users[0]
 
+    def get_learning_language(self) -> Optional[str]:
+        """Return the user's currently active learning language code (e.g. 'es')."""
+        try:
+            user_data = self.verify_auth()
+            lang = user_data.get("learningLanguage")
+            return lang.lower() if lang else None
+        except Exception:
+            return None
+
     def get_public_user(self, username: str) -> Dict[str, Any]:
         """Fetch public profile info for any user (without requiring auth)."""
         url = f"https://www.duolingo.com/2017-06-30/users?username={username}"

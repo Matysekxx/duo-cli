@@ -18,7 +18,15 @@ import click
 from rich.prompt import Prompt
 
 from .api import DuoAPIError, DuoClient
-from .config import clear_config, get_jwt, get_username, is_authenticated, set_credentials
+from .config import (
+    clear_config,
+    get_jwt,
+    get_preset_language,
+    get_username,
+    is_authenticated,
+    set_credentials,
+    set_preset_language,
+)
 from .practice import AutoPractice, PracticeSession
 from .ui import (
     DIVIDER_LINE,
@@ -159,16 +167,31 @@ def courses_cmd() -> None:
 @click.argument("language_code")
 def switch_cmd(language_code: str) -> None:
     """Switch active learning course (e.g. duo switch es)."""
+    if not language_code:
+        print_error("Usage: duo switch <language_code>  (e.g. duo switch es)")
+        return
     if not is_authenticated():
         print_error("Not authenticated. Run 'duo login'.")
         return
+
+    lang = language_code.lower()
+    old = get_preset_language()
     try:
         client = DuoClient()
-        success = client.switch_language(language_code.lower())
+        # Always persist the choice locally so practice/auto remember it.
+        set_preset_language(lang)
+        success = client.switch_language(lang)
         if success:
-            print_success(f"Switched active course to: [bold bright_cyan]{language_code.upper()}[/]")
+            print_success(
+                f"Switched active course to: [bold bright_cyan]{lang.upper()}[/]"
+                + (f"  (was {old.upper()})" if old and old != lang else "")
+                + "  [dim]— saved as local preset[/dim]"
+            )
         else:
-            print_error(f"Failed to switch course to: {language_code.upper()}")
+            print_warning(
+                f"Server didn't confirm the switch, but [bold bright_cyan]{lang.upper()}[/] "
+                f"is saved as your local preset for practice/auto."
+            )
     except Exception as e:
         print_error(f"Error switching course: {e}")
 
@@ -341,7 +364,8 @@ def shell_cmd() -> None:
     console.print()
     console.print("[bold bright_green]🦉 DUO INTERACTIVE SHELL[/]")
     console.print(f"[dim green]{DIVIDER_LINE}[/]")
-    console.print(f"  Active User : [bold bright_white]@{username}[/]")
+    preset = get_preset_language() or "es"
+    console.print(f"  Active User : [bold bright_white]@{username}[/]   Course: [bold bright_cyan]{preset.upper()}[/]")
     console.print("  Type 'help' for commands, 'exit' to quit.")
     console.print(f"[dim green]{DIVIDER_LINE}[/]\n")
 
@@ -364,7 +388,7 @@ def shell_cmd() -> None:
 
     while True:
         try:
-            prompt_str = f"[bold bright_green]🦉 duo:{username}[/] > "
+            prompt_str = f"[bold bright_green]🦉 duo:{username}/{get_preset_language() or 'es'}[/] > "
             raw = Prompt.ask(prompt_str).strip()
             if not raw:
                 continue
@@ -405,6 +429,8 @@ def shell_cmd() -> None:
                                 lang = args[i + 1]
 
                         ctx.invoke(cmd_map[cmd_name], sessions=sessions, target_xp=target_xp, until_goal=until_goal, loop=loop, lang=lang, fast=fast)
+                    elif cmd_name == "switch" and args:
+                        ctx.invoke(cmd_map[cmd_name], language_code=args[0])
                     else:
                         ctx.invoke(cmd_map[cmd_name])
                 except Exception as ex:

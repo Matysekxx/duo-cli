@@ -149,3 +149,34 @@ def clear_config() -> None:
 def is_authenticated() -> bool:
     """Check if valid JWT token and username are configured."""
     return bool(get_jwt() and get_username())
+
+
+def get_preset_language() -> Optional[str]:
+    """Return the locally saved default practice language (preset), if any."""
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                lang = data.get("preset_language")
+                return lang.lower() if lang else None
+        except Exception:
+            pass
+    return None
+
+
+def set_preset_language(lang_code: str) -> None:
+    """Persist the default practice language (preset) to config.json."""
+    ensure_config_dir()
+    clean = (lang_code or "").strip().lower()
+    if not clean:
+        return
+    data = {}
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            pass
+    data["preset_language"] = clean
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)

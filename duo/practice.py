@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from rich.prompt import Prompt
 
 from .api import DuoClient, extract_challenge_solution, get_flag
+from .config import get_preset_language
 
 # Types whose answer depends on images / glyph drawing that a terminal cannot
 # present. They are auto-completed in the interactive session until proper
@@ -51,7 +52,15 @@ class PracticeSession:
 
     def __init__(self, client: DuoClient, lang_code: Optional[str] = None):
         self.client = client
-        self.lang_code = (lang_code or "es").lower()
+        # Resolution order: explicit -l flag > local preset > server active
+        # course > "es". The local preset lets `duo switch` stick even when the
+        # server doesn't reflect the change.
+        self.lang_code = (
+            lang_code
+            or get_preset_language()
+            or client.get_learning_language()
+            or "es"
+        ).lower()
         self.score = 0
         self.hearts = 5
         self.combo = 0
@@ -93,7 +102,7 @@ class PracticeSession:
         console.print("    • [white]Multiple choice[/] → type the [bold yellow]number[/] of your answer")
         console.print("    • [white]Translate[/] → type the translation")
         console.print("    • [white]Build sentence[/] → type word [bold yellow]numbers[/] in order (e.g. [yellow]3 1 4 2[/]) or the sentence")
-        console.print("    • [white]skip[/] to skip a question · [white]exit[/] to quit")
+        console.print("    • [white]exit[/] to quit the session")
         console.print(f"[dim green]{DIVIDER_LINE}[/]\n")
 
         for idx, q in enumerate(questions, 1):
@@ -116,15 +125,24 @@ class PracticeSession:
             choices = q.get("choices", [])
             word_bank = q.get("word_bank", [])
 
+            # Skip challenges we cannot render (no prompt and no options to
+            # show) so a session never presents a blank/confusing question.
+            renderable = bool(prompt_text and prompt_text.strip()) or choices or word_bank or pair_tuples
+            if not renderable:
+                console.print(
+                    f"\n[dim yellow]⏭ Unsupported challenge ('{q_type}') "
+                    f"can't be shown in terminal. Skipped![/dim yellow]"
+                )
+                self.score += 1
+                time.sleep(0.3)
+                continue
+
             if word_bank:
                 render_build_card(idx, len(questions), prompt_text, word_bank, self.hearts, self.combo, self.lang_code, q_type)
 
                 user_input = Prompt.ask(f"\n[bold bright_green]Your sentence[/]").strip()
                 if user_input.lower() in ["exit", "quit", "q"]:
                     break
-                if user_input.lower() in ["skip", "s"]:
-                    console.print("[dim yellow]⏭ Question skipped.[/dim yellow]")
-                    continue
 
                 # Accept either an ordered list of word numbers or a typed sentence
                 parts = user_input.split()
@@ -157,10 +175,6 @@ class PracticeSession:
                     ans = Prompt.ask(f"    [bold bright_green]Choice (1-{len(remaining_right)})[/]").strip()
                     if ans.lower() in ["exit", "quit", "q"]:
                         return
-                    if ans.lower() in ["skip", "s"]:
-                        console.print("[dim yellow]⏭ Matching question skipped.[/dim yellow]")
-                        matched_all = True
-                        break
 
                     picked = None
                     if ans.isdigit() and 1 <= int(ans) <= len(remaining_right):
@@ -190,9 +204,6 @@ class PracticeSession:
                 user_input = Prompt.ask(f"\n{prompt_str}").strip()
                 if user_input.lower() in ["exit", "quit", "q"]:
                     break
-                if user_input.lower() in ["skip", "s"]:
-                    console.print("[dim yellow]⏭ Question skipped.[/dim yellow]")
-                    continue
 
                 is_correct = False
                 if user_input.isdigit() and shuffled_choices and 1 <= int(user_input) <= len(shuffled_choices):
@@ -253,7 +264,7 @@ class AutoPractice:
         fast: bool = False,
     ):
         self.client = client
-        self.lang_code = (lang_code or "es").lower()
+        self.lang_code = lang_code
         self.fast = fast
         if fast:
             self.delay_min = 0.3
@@ -278,7 +289,11 @@ class AutoPractice:
             user_info = self.client.verify_auth()
             streak_info = self.client.get_streak_info()
             if not self.lang_code:
-                self.lang_code = user_info.get("learningLanguage", "es")
+                self.lang_code = (
+                    get_preset_language()
+                    or user_info.get("learningLanguage")
+                    or "es"
+                ).lower()
         except Exception as e:
             print_error(f"Failed to connect to Duolingo: {e}")
             return
