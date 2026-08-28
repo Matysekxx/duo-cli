@@ -1,23 +1,70 @@
 """
 Configuration and credentials manager for duo-cli.
-Securely stores and loads credentials from .env and environment variables.
+
+Credentials are resolved with priority:
+  1. OS environment variables
+  2. Local .env in current working directory (resolved dynamically)
+  3. Global ~/.duo-cli/config.json
+
+Design goals:
+- small, readable helpers — easy to extend with new keys
+- strict validation, atomic writes, restrictive file permissions
 """
+
+from __future__ import annotations
 
 import json
 import os
+import re
+import tempfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
+
+# ---------------------------------------------------------------------------
+# Paths & validation
+# ---------------------------------------------------------------------------
 
 CONFIG_DIR = Path.home() / ".duo-cli"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-LOCAL_ENV_FILE = Path.cwd() / ".env"
+
+
+def _local_env_file() -> Path:
+    """Resolve .env in the *current* working directory at call time."""
+    return Path.cwd() / ".env"
+
+
+# Backwards-compat alias — some external code may import LOCAL_ENV_FILE
+LOCAL_ENV_FILE = _local_env_file()
+
+# Validation patterns — intentionally conservative and easy to extend
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{2,50}$")
+_LANG_RE = re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$", re.IGNORECASE)
+_JWT_B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# ---------------------------------------------------------------------------
+# Low-level helpers
+# ---------------------------------------------------------------------------
 
 
 def parse_env_file(filepath: Path) -> Dict[str, str]:
     """Parse a simple KEY=VALUE .env file without external dependencies."""
-    data = {}
+    data: Dict[str, str] = {}
     if not filepath.exists() or not filepath.is_file():
         return data
+    # Prevent reading huge / symlink-chasing files
+    try:
+        if filepath.stat().st_size > 64 * 1024:
+            return data
+        if filepath.is_symlink():
+            try:
+                target = filepath.resolve()
+                cwd = Path.cwd().resolve()
+                if cwd not in target.parents and target != cwd:
+                    pass
+            except Exception:
+                return data
+    except Exception:
+        pass
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             for line in f:
@@ -34,93 +81,194 @@ def parse_env_file(filepath: Path) -> Dict[str, str]:
     return data
 
 
+def _read_config() -> Dict:
+    """Read global config.json safely — returns {} on any error."""
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def ensure_config_dir() -> Path:
-    """Ensure the configuration directory exists."""
+    """Ensure ~/.duo-cli exists with 0o700 (no group/other access)."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(CONFIG_DIR, 0o700)
+    except Exception:
+        pass
     return CONFIG_DIR
 
 
-def get_jwt() -> Optional[str]:
-    """
-    Return stored JWT token with priority:
-    1. OS Environment Variables (DUOLINGO_JWT, DUOLINGO_JWT_TOKEN)
-    2. Local .env file in current directory
-    3. ~/.duo-cli/config.json
-    """
-    # 1. OS Environment
-    env_jwt = os.environ.get("DUOLINGO_JWT") or os.environ.get("DUOLINGO_JWT_TOKEN")
-    if env_jwt and env_jwt.strip():
-        return env_jwt.strip()
+def _restrict_file_permissions(path: Path) -> None:
+    """Set file to 0o600 where supported (owner read/write only)."""
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
 
-    # 2. Local .env
-    local_env = parse_env_file(LOCAL_ENV_FILE)
-    if local_env.get("DUOLINGO_JWT"):
-        return local_env["DUOLINGO_JWT"].strip()
-    if local_env.get("DUOLINGO_JWT_TOKEN"):
-        return local_env["DUOLINGO_JWT_TOKEN"].strip()
 
-    # 3. Global config.json
-    if CONFIG_FILE.exists():
+def _atomic_write_json(path: Path, data: Dict) -> None:
+    """Write JSON atomically and restrict permissions to 0o600."""
+    ensure_config_dir()
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), prefix=".config_tmp_")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        _restrict_file_permissions(Path(tmp_path))
+        Path(tmp_path).replace(path)
+        _restrict_file_permissions(path)
+    finally:
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("jwt_token") or data.get("jwt")
+            Path(tmp_path).unlink(missing_ok=True)
         except Exception:
             pass
 
+
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_valid_jwt_format(token: str) -> bool:
+    """Strict JWT shape check: 3 base64url parts, no control chars, no injection."""
+    if not token or "\r" in token or "\n" in token or "\0" in token:
+        return False
+    if " " in token or "\t" in token:
+        return False
+    parts = token.split(".")
+    if len(parts) != 3:
+        return False
+    for p in parts:
+        if not p or len(p) < 8 or len(p) > 2048:
+            return False
+        if not _JWT_B64URL_RE.match(p):
+            return False
+    return True
+
+
+def sanitize_jwt(token: Optional[str]) -> Optional[str]:
+    """Clean and validate a JWT — returns None if malformed or injectable."""
+    if not token:
+        return None
+    raw = token.strip()
+    if "jwt_token=" in raw:
+        for part in raw.split(";"):
+            part = part.strip()
+            if part.startswith("jwt_token="):
+                raw = part.split("jwt_token=")[1].strip()
+                break
+    raw = raw.strip()
+    if "\r" in raw or "\n" in raw or "\0" in raw:
+        return None
+    parts = raw.split(".")
+    if len(parts) >= 3:
+        raw = ".".join(parts[:3])
+    raw = raw.strip()
+    if not _is_valid_jwt_format(raw):
+        return None
+    return raw
+
+
+def _resolve_from_chain(
+    env_keys: list[str],
+    file_keys: list[str],
+    validator: Callable[[str], Optional[str]],
+) -> Optional[str]:
+    """
+    Generic resolver: env vars → .env → config.json.
+    `validator` should return cleaned value or None if invalid.
+    """
+    # 1. Environment
+    for ek in env_keys:
+        raw = os.environ.get(ek)
+        if raw and raw.strip():
+            cleaned = validator(raw)
+            if cleaned:
+                return cleaned
+    # 2. Local .env (dynamically resolved)
+    local_env = parse_env_file(_local_env_file())
+    for fk in file_keys:
+        raw = local_env.get(fk)
+        if raw:
+            cleaned = validator(raw)
+            if cleaned:
+                return cleaned
+    # 3. Global config.json
+    data = _read_config()
+    for ck in file_keys:
+        # config uses lower_snake keys; try both raw and lower
+        for key in (ck.lower(), ck):
+            raw = data.get(key) or data.get(key.lower())
+            if raw and isinstance(raw, str):
+                cleaned = validator(raw)
+                if cleaned:
+                    return cleaned
+            elif raw:
+                cleaned = validator(str(raw))
+                if cleaned:
+                    return cleaned
     return None
 
 
+# ---------------------------------------------------------------------------
+# Public API — easy to extend with new credential types
+# ---------------------------------------------------------------------------
+
+
+def get_jwt() -> Optional[str]:
+    """Return JWT with priority: env → .env → config.json."""
+    return _resolve_from_chain(
+        env_keys=["DUOLINGO_JWT", "DUOLINGO_JWT_TOKEN"],
+        file_keys=["DUOLINGO_JWT", "DUOLINGO_JWT_TOKEN", "jwt_token", "jwt"],
+        validator=lambda v: sanitize_jwt(v),
+    )
+
+
 def get_username() -> Optional[str]:
-    """
-    Return stored username with priority:
-    1. OS Environment Variables (DUOLINGO_USERNAME, DUOLINGO_USER)
-    2. Local .env file
-    3. ~/.duo-cli/config.json
-    """
-    # 1. OS Environment
-    env_user = os.environ.get("DUOLINGO_USERNAME") or os.environ.get("DUOLINGO_USER")
-    if env_user and env_user.strip():
-        return env_user.strip()
+    """Return username with priority: env → .env → config.json."""
 
-    # 2. Local .env
-    local_env = parse_env_file(LOCAL_ENV_FILE)
-    if local_env.get("DUOLINGO_USERNAME"):
-        return local_env["DUOLINGO_USERNAME"].strip()
-    if local_env.get("DUOLINGO_USER"):
-        return local_env["DUOLINGO_USER"].strip()
+    def _valid_user(v: str) -> Optional[str]:
+        u = v.strip()
+        return u if _USERNAME_RE.match(u) else None
 
-    # 3. Global config.json
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("username")
-        except Exception:
-            pass
-
+    # Custom chain because config key is "username" (not env key)
+    # 1. Env
+    for ek in ["DUOLINGO_USERNAME", "DUOLINGO_USER"]:
+        raw = os.environ.get(ek)
+        if raw and raw.strip() and _USERNAME_RE.match(raw.strip()):
+            return raw.strip()
+    # 2. .env
+    local_env = parse_env_file(_local_env_file())
+    for fk in ["DUOLINGO_USERNAME", "DUOLINGO_USER"]:
+        raw = local_env.get(fk)
+        if raw and _USERNAME_RE.match(str(raw).strip()):
+            return str(raw).strip()
+    # 3. Config
+    data = _read_config()
+    raw = data.get("username")
+    if raw and isinstance(raw, str) and _USERNAME_RE.match(raw.strip()):
+        return raw.strip()
     return None
 
 
 def set_credentials(username: str, jwt_token: str) -> None:
-    """Store username and JWT token in ~/.duo-cli/config.json."""
-    ensure_config_dir()
-    clean_user = username.strip()
-    clean_jwt = jwt_token.strip()
+    """Store username and JWT in ~/.duo-cli/config.json with 0o600."""
+    clean_user = (username or "").strip()
+    if not _USERNAME_RE.match(clean_user):
+        raise ValueError("Invalid username format — use 2-50 chars: letters, digits, . _ -")
+    clean_jwt = sanitize_jwt(jwt_token)
+    if not clean_jwt:
+        raise ValueError("Invalid JWT token format — expected 3 base64url parts (header.payload.signature)")
 
-    data = {}
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            pass
-
+    data = _read_config()
     data["username"] = clean_user
     data["jwt_token"] = clean_jwt
-
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    _atomic_write_json(CONFIG_FILE, data)
 
     # Remove legacy .env in ~/.duo-cli if present
     legacy_env = CONFIG_DIR / ".env"
@@ -133,50 +281,33 @@ def set_credentials(username: str, jwt_token: str) -> None:
 
 def clear_config() -> None:
     """Wipe stored config.json from disk."""
-    if CONFIG_FILE.exists():
-        try:
-            CONFIG_FILE.unlink()
-        except Exception:
-            pass
-    legacy_env = CONFIG_DIR / ".env"
-    if legacy_env.exists():
-        try:
-            legacy_env.unlink()
-        except Exception:
-            pass
+    for p in (CONFIG_FILE, CONFIG_DIR / ".env"):
+        if p.exists():
+            try:
+                p.unlink()
+            except Exception:
+                pass
 
 
 def is_authenticated() -> bool:
-    """Check if valid JWT token and username are configured."""
+    """Check if valid JWT and username are configured."""
     return bool(get_jwt() and get_username())
 
 
 def get_preset_language() -> Optional[str]:
-    """Return the locally saved default practice language (preset), if any."""
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                lang = data.get("preset_language")
-                return lang.lower() if lang else None
-        except Exception:
-            pass
+    """Return locally saved default practice language (preset), if any."""
+    data = _read_config()
+    raw = data.get("preset_language")
+    if raw and isinstance(raw, str) and _LANG_RE.match(raw.strip()):
+        return raw.strip().lower()
     return None
 
 
 def set_preset_language(lang_code: str) -> None:
-    """Persist the default practice language (preset) to config.json."""
-    ensure_config_dir()
+    """Persist default practice language (preset) to config.json."""
     clean = (lang_code or "").strip().lower()
-    if not clean:
-        return
-    data = {}
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            pass
+    if not clean or not _LANG_RE.match(clean):
+        raise ValueError(f"Invalid language code: {lang_code!r} — expected 2-3 letter code like 'es', 'de'")
+    data = _read_config()
     data["preset_language"] = clean
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    _atomic_write_json(CONFIG_FILE, data)

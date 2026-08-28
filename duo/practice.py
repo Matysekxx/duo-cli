@@ -10,9 +10,12 @@ from rich.prompt import Prompt
 from .api import DuoClient, extract_challenge_solution, get_flag
 from .config import get_preset_language
 
+# ---------------------------------------------------------------------------
+# Practice constants — single source of truth, easy to tune/extend
+# ---------------------------------------------------------------------------
+
 # Types whose answer depends on images / glyph drawing that a terminal cannot
-# present. They are auto-completed in the interactive session until proper
-# support is added.
+# present. They are auto-completed in the interactive session.
 VISUAL_CHALLENGE_TYPES = {
     "radioImageSelect",
     "characterIntro",
@@ -23,6 +26,12 @@ VISUAL_CHALLENGE_TYPES = {
     "characterWrite",
     "svgPuzzle",
 }
+
+# Auto mode timing — fixed as requested (1-2s per question, 20-50s between)
+AUTO_QUESTION_DELAY_MIN = 1.0
+AUTO_QUESTION_DELAY_MAX = 2.0
+AUTO_REST_MIN = 20.0
+AUTO_REST_MAX = 50.0
 from .ui import (
     DIVIDER_LINE,
     console,
@@ -270,27 +279,29 @@ class PracticeSession:
 
 
 class AutoPractice:
-    """Automated Practice Solver Engine with natural delays and multi-session capabilities."""
+    """Automated Practice Solver Engine — fixed 1-2s per question, 20-50s between lessons."""
+
+    # Re-export constants for easy external tuning / testing
+    QUESTION_DELAY_MIN = AUTO_QUESTION_DELAY_MIN
+    QUESTION_DELAY_MAX = AUTO_QUESTION_DELAY_MAX
+    REST_MIN = AUTO_REST_MIN
+    REST_MAX = AUTO_REST_MAX
 
     def __init__(
         self,
         client: DuoClient,
         lang_code: Optional[str] = None,
-        delay_min: float = 1.2,
-        delay_max: float = 2.8,
-        fast: bool = False,
         max_sessions: Optional[int] = None,
     ):
         self.client = client
         self.lang_code = lang_code
-        self.fast = fast
         self.max_sessions = max_sessions
-        if fast:
-            self.delay_min = 0.3
-            self.delay_max = 0.7
-        else:
-            self.delay_min = max(delay_min, 0.5)
-            self.delay_max = max(delay_max, self.delay_min)
+        self.hearts = 5
+        # Fixed timing — single source, easy to extend via constructor later if needed
+        self.delay_min = self.QUESTION_DELAY_MIN
+        self.delay_max = self.QUESTION_DELAY_MAX
+        self.rest_min = self.REST_MIN
+        self.rest_max = self.REST_MAX
 
     def run(
         self,
@@ -358,7 +369,7 @@ class AutoPractice:
 
                 console.print(f"[bold bright_cyan]▶ Starting Session {session_num}...[/]")
 
-                # Create live session on server
+                # Create live session on server — no retry, fail cleanly if it breaks
                 try:
                     server_sess = self.client.create_practice_session(self.lang_code)
                     raw_challenges = server_sess.get("challenges", [])
@@ -372,30 +383,24 @@ class AutoPractice:
                     except Exception:
                         pass
                 except Exception as e:
-                    print_warning(f"Could not load live challenges from server: {e}. Retrying...")
-                    time.sleep(2)
-                    continue
+                    print_error(f"Could not create practice session: {e}")
+                    break
 
                 if not raw_challenges:
-                    print_warning("No challenges returned by server. Retrying in 2 seconds...")
-                    time.sleep(2)
-                    continue
+                    print_error("No challenges returned by server — stopping.")
+                    break
 
                 total_q = len(raw_challenges)
                 score = 0
                 session_start_time = time.time()
 
-                # Solve each question with randomized human-like pauses
+                # Solve each question — fixed 1-2s per question (extensible via constants)
                 for q_idx, ch in enumerate(raw_challenges, 1):
                     details = extract_challenge_solution(ch)
                     prompt = details.get("prompt") or f"Question {q_idx}"
                     answer = details.get("answer") or "OK"
 
-                    # Calculate pause
                     pause = random.uniform(self.delay_min, self.delay_max)
-                    # Occasionally "think" a bit longer, like a human would
-                    if random.random() < 0.12:
-                        pause += random.uniform(1.5, 4.0)
                     render_auto_challenge(
                         session_idx=session_num,
                         total_sessions=0 if loop else (sessions if (not until_goal and not target_xp) else 0),
@@ -444,17 +449,8 @@ class AutoPractice:
                         should_continue = False
 
                 if should_continue:
-                    # Human-like pacing between sessions to avoid bot-like
-                    # regularity. Longer randomized gaps + occasional long breaks.
-                    if self.fast:
-                        rest_pause = random.uniform(4.0, 10.0)
-                    elif loop and sessions_completed > 0 and sessions_completed % 5 == 0:
-                        rest_pause = random.uniform(45.0, 120.0)
-                    else:
-                        rest_pause = random.uniform(12.0, 35.0)
-                        # Occasionally throw in an extra-long "coffee break"
-                        if random.random() < 0.1:
-                            rest_pause = random.uniform(60.0, 180.0)
+                    # Fixed pause between lessons: 20-50s (single source, easy to tune)
+                    rest_pause = random.uniform(self.rest_min, self.rest_max)
                     console.print(f"[dim]⏳ Resting for {rest_pause:.0f}s before next session...[/]\n")
                     time.sleep(rest_pause)
 

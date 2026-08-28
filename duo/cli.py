@@ -2,9 +2,12 @@
 Main CLI entrypoint and interactive shell loop for duo-cli in English.
 """
 
+import functools
 import os
+import re
+import shlex
 import sys
-from typing import Optional
+from typing import Callable, Optional
 
 # Ensure UTF-8 output on Windows
 if sys.platform == "win32":
@@ -30,6 +33,7 @@ from .config import (
 from .practice import AutoPractice, PracticeSession
 from .ui import (
     DIVIDER_LINE,
+    __version__ as UI_VERSION,
     console,
     print_banner,
     print_error,
@@ -41,18 +45,85 @@ from .ui import (
     render_friends_table,
     render_help,
     render_profile,
-    render_quests,
     render_shop,
     render_status,
-    render_vocabulary_table,
 )
 
 
+# ---------------------------------------------------------------------------
+# Small extensibility helpers — keep command bodies focused on business logic
+# ---------------------------------------------------------------------------
+
+_LANG_RE = re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$", re.IGNORECASE)
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{2,50}$")
+
+
+def _is_valid_lang(lang: str) -> bool:
+    return bool(lang and _LANG_RE.match(lang))
+
+
+def _require_auth(func: Callable) -> Callable:
+    """Decorator for commands that need a logged-in user — keeps auth checks DRY."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if not is_authenticated():
+            print_error("Not authenticated. Run 'duo login'.")
+            return None
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def _parse_shell_auto_args(args: list[str]) -> dict:
+    """Parse `auto` flags inside the interactive shell (simple, no click re-parse)."""
+    params: dict = {
+        "until_goal": "-g" in args or "--until-goal" in args,
+        "loop": "-L" in args or "--loop" in args,
+        "sessions": 1,
+        "target_xp": None,
+        "lang": None,
+        "max_sessions": None,
+    }
+    for i, a in enumerate(args):
+        if a in ("-s", "--sessions") and i + 1 < len(args) and args[i + 1].isdigit():
+            params["sessions"] = int(args[i + 1])
+        elif a in ("-x", "--target-xp") and i + 1 < len(args) and args[i + 1].isdigit():
+            params["target_xp"] = int(args[i + 1])
+        elif a in ("-l", "--lang") and i + 1 < len(args):
+            params["lang"] = args[i + 1]
+        elif a in ("-m", "--max-sessions") and i + 1 < len(args) and args[i + 1].isdigit():
+            params["max_sessions"] = int(args[i + 1])
+    return params
+
+
 class DuoGroup(click.Group):
-    """Custom Click Group with beautiful Rich-formatted help output."""
+    """Custom Click Group with beautiful Rich-formatted help output and graceful error handling."""
+
     def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         print_banner()
         render_help()
+
+    def resolve_command(self, ctx: click.Context, args):
+        """Intercept unknown commands / bad usage and show friendly TUI error instead of raw traceback."""
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError as e:
+            print_banner()
+            print_error(str(e))
+            if args:
+                attempted = args[0].lstrip("-")
+                if "No such command" in str(e) and attempted:
+                    import difflib
+
+                    all_cmds = list(self.commands.keys())
+                    matches = difflib.get_close_matches(attempted, all_cmds, n=3, cutoff=0.6)
+                    if matches:
+                        console.print(
+                            f"[dim]Did you mean:[/] [bold bright_green]{', '.join(matches)}[/][dim] ?[/dim]"
+                        )
+            console.print("[dim]Run [bold]duo help[/] or [bold]duo --help[/] to see all commands.[/dim]\n")
+            ctx.exit(2)
 
 
 @click.group(cls=DuoGroup, invoke_without_command=True)
@@ -61,7 +132,7 @@ class DuoGroup(click.Group):
 def cli(ctx: click.Context, version: bool) -> None:
     """🦉 Duo-CLI: Modern Duolingo Terminal Client & Automated Learning Engine."""
     if version:
-        console.print("[bold bright_green]duo-cli[/] version [bold bright_yellow]1.0.0[/]")
+        console.print(f"[bold bright_green]duo-cli[/] version [bold bright_yellow]{UI_VERSION}[/]")
         ctx.exit()
 
     if ctx.invoked_subcommand is None:
@@ -89,6 +160,8 @@ def login_cmd(username: str, jwt: str) -> None:
     print_banner()
     if not username:
         username = Prompt.ask("[bold bright_cyan]Enter Duolingo username[/]").strip()
+        # Limit length to prevent abuse
+        username = username[:100]
     if not jwt:
         console.print(
             "\n[bold bright_yellow]ℹ How to get your JWT token in Chrome / Edge / Firefox:[/]\n"
@@ -98,9 +171,19 @@ def login_cmd(username: str, jwt: str) -> None:
             "  4. Press [bold]Enter[/] (token is automatically copied to your clipboard)\n"
         )
         jwt = Prompt.ask("[bold bright_cyan]Paste JWT token (Ctrl+V)[/]").strip()
+        jwt = jwt[:5000]
 
     if not username or not jwt:
         print_error("Both username and JWT token are required.")
+        return
+
+    # Early format checks before touching disk — give user clear feedback
+    if not _USERNAME_RE.match(username):
+        print_error("Invalid username — use 2-50 chars: letters, digits, . _ -")
+        return
+    # Don't echo the token itself in errors
+    if "\r" in jwt or "\n" in jwt:
+        print_error("Invalid JWT token — contains line breaks")
         return
 
     try:
@@ -109,7 +192,12 @@ def login_cmd(username: str, jwt: str) -> None:
         user_info = client.verify_auth()
         print_success(f"Successfully logged in as [bold bright_white]@{user_info.get('username')}[/]! 🔥 Streak: {user_info.get('streak', 0)} Days.")
     except Exception as e:
-        print_error(f"Authentication failed: {e}")
+        # Never leak the raw token in error output
+        msg = str(e)
+        if jwt and jwt[:20] in msg:
+            msg = msg.replace(jwt, "[REDACTED]")
+            msg = msg.replace(jwt[:30], "[REDACTED]")
+        print_error(f"Authentication failed: {msg}")
 
 
 @cli.command("logout")
@@ -135,11 +223,9 @@ def whoami_cmd() -> None:
 
 
 @cli.command("status")
+@_require_auth
 def status_cmd() -> None:
     """Show detailed streak, daily goals, and active language status."""
-    if not is_authenticated():
-        print_error("Not authenticated. Run 'duo login'.")
-        return
     try:
         client = DuoClient()
         user_data = client.verify_auth()
@@ -150,11 +236,9 @@ def status_cmd() -> None:
 
 
 @cli.command("courses")
+@_require_auth
 def courses_cmd() -> None:
     """List all enrolled languages and courses."""
-    if not is_authenticated():
-        print_error("Not authenticated. Run 'duo login'.")
-        return
     try:
         client = DuoClient()
         courses = client.get_courses()
@@ -169,6 +253,9 @@ def switch_cmd(language_code: str) -> None:
     """Switch active learning course (e.g. duo switch es)."""
     if not language_code:
         print_error("Usage: duo switch <language_code>  (e.g. duo switch es)")
+        return
+    if not _is_valid_lang(language_code):
+        print_error(f"Invalid language code: {language_code!r} — expected like 'es', 'de', 'fr'")
         return
     if not is_authenticated():
         print_error("Not authenticated. Run 'duo login'.")
@@ -198,10 +285,17 @@ def switch_cmd(language_code: str) -> None:
 
 @cli.command("calendar")
 @click.option("--days", "-d", default=14, help="Number of past days to display (default: 14)")
+@_require_auth
 def calendar_cmd(days: int) -> None:
     """Show calendar activity and streak history."""
-    if not is_authenticated():
-        print_error("Not authenticated. Run 'duo login'.")
+    # Clamp days to sane range to avoid huge loops / abuse
+    try:
+        days = int(days)
+    except Exception:
+        print_error("Invalid --days value — must be an integer")
+        return
+    if not 1 <= days <= 365:
+        print_error("Invalid --days value — must be between 1 and 365")
         return
     try:
         client = DuoClient()
@@ -211,26 +305,10 @@ def calendar_cmd(days: int) -> None:
         print_error(f"Failed to load calendar: {e}")
 
 
-@cli.command("quests")
-def quests_cmd() -> None:
-    """Display daily quests and achievement progress."""
-    if not is_authenticated():
-        print_error("Not authenticated. Run 'duo login'.")
-        return
-    try:
-        client = DuoClient()
-        quests = client.get_quests()
-        render_quests(quests)
-    except Exception as e:
-        print_error(f"Failed to load quests: {e}")
-
-
 @cli.command("shop")
+@_require_auth
 def shop_cmd() -> None:
     """Browse Duolingo shop items and gem pricing."""
-    if not is_authenticated():
-        print_error("Not authenticated. Run 'duo login'.")
-        return
     try:
         client = DuoClient()
         items = client.get_shop_items()
@@ -241,11 +319,9 @@ def shop_cmd() -> None:
 
 
 @cli.command("freeze")
+@_require_auth
 def freeze_cmd() -> None:
     """Purchase and equip Streak Freeze item."""
-    if not is_authenticated():
-        print_error("Not authenticated. Run 'duo login'.")
-        return
     try:
         client = DuoClient()
         client.buy_streak_freeze()
@@ -254,26 +330,13 @@ def freeze_cmd() -> None:
         print_error(f"Purchase failed: {e}")
 
 
-@cli.command("vocab")
-@click.option("--lang", "-l", help="Language code filter (e.g. es, de, fr)")
-@click.option("--limit", "-n", default=30, help="Maximum number of words to show")
-def vocab_cmd(lang: str, limit: int) -> None:
-    """Browse learned vocabulary and strength."""
-    if not is_authenticated():
-        print_error("Not authenticated. Run 'duo login'.")
-        return
-    try:
-        client = DuoClient()
-        vocab = client.get_vocabulary(lang)
-        render_vocabulary_table(vocab, limit)
-    except Exception as e:
-        print_error(f"Failed to load vocabulary: {e}")
-
-
 @cli.command("profile")
 @click.argument("username", required=False)
 def profile_cmd(username: Optional[str]) -> None:
     """View user profile stats and achievements."""
+    if username and (len(username) > 50 or not _USERNAME_RE.match(username)):
+        print_error("Invalid username format")
+        return
     try:
         client = DuoClient()
         if username:
@@ -289,11 +352,9 @@ def profile_cmd(username: Optional[str]) -> None:
 
 
 @cli.command("friends")
+@_require_auth
 def friends_cmd() -> None:
     """View list of friends and followers."""
-    if not is_authenticated():
-        print_error("Not authenticated. Run 'duo login'.")
-        return
     try:
         client = DuoClient()
         friends = client.get_friends()
@@ -306,6 +367,9 @@ def friends_cmd() -> None:
 @click.option("--lang", "-l", default=None, help="Target language (e.g. es, de, en)")
 def practice_cmd(lang: Optional[str]) -> None:
     """Start an interactive practice session to earn XP and maintain streak."""
+    if lang and not _is_valid_lang(lang):
+        print_error(f"Invalid language code: {lang!r}")
+        return
     client = DuoClient()
     if not client.is_authenticated():
         print_warning("Running in offline mode. Run 'duo login' to sync XP with Duolingo servers.")
@@ -319,9 +383,6 @@ def practice_cmd(lang: Optional[str]) -> None:
 @click.option("--until-goal", "-g", is_flag=True, help="Run practice sessions until today's daily XP goal is reached")
 @click.option("--loop", "-L", is_flag=True, help="Run practice sessions forever (until Ctrl+C)")
 @click.option("--lang", "-l", default=None, help="Target language code (e.g. es, de, fr)")
-@click.option("--delay-min", default=1.2, type=float, help="Minimum delay between questions in seconds (default: 1.2)")
-@click.option("--delay-max", default=2.8, type=float, help="Maximum delay between questions in seconds (default: 2.8)")
-@click.option("--fast", is_flag=True, help="Fast mode with reduced delays (~0.3s - 0.7s)")
 @click.option("--max-sessions", "-m", default=None, type=int, help="Hard cap on number of sessions (recommended with -L to avoid bans)")
 def auto_cmd(
     sessions: int,
@@ -329,14 +390,28 @@ def auto_cmd(
     until_goal: bool,
     loop: bool,
     lang: Optional[str],
-    delay_min: float,
-    delay_max: float,
-    fast: bool,
     max_sessions: Optional[int],
 ) -> None:
     """Automate Duolingo practice sessions with natural delays to earn XP and keep streak."""
     if not is_authenticated():
         print_error("Not authenticated. Run 'duo login'.")
+        return
+    if lang and not _is_valid_lang(lang):
+        print_error(f"Invalid language code: {lang!r}")
+        return
+    # Clamp numeric inputs to sane ranges to avoid abuse / hangs
+    try:
+        if sessions is not None and not 1 <= int(sessions) <= 1000:
+            print_error("Invalid --sessions value — must be between 1 and 1000")
+            return
+        if target_xp is not None and not 1 <= int(target_xp) <= 10000:
+            print_error("Invalid --target-xp value — must be between 1 and 10000")
+            return
+        if max_sessions is not None and not 1 <= int(max_sessions) <= 1000:
+            print_error("Invalid --max-sessions value — must be between 1 and 1000")
+            return
+    except Exception as e:
+        print_error(f"Invalid numeric option: {e}")
         return
     if loop:
         print_warning(
@@ -347,9 +422,6 @@ def auto_cmd(
     bot = AutoPractice(
         client=client,
         lang_code=lang,
-        delay_min=delay_min,
-        delay_max=delay_max,
-        fast=fast,
         max_sessions=max_sessions,
     )
     bot.run(sessions=sessions, target_xp=target_xp, until_goal=until_goal, loop=loop)
@@ -366,14 +438,15 @@ def help_cmd() -> None:
 def shell_cmd() -> None:
     """Launch interactive Duo REPL shell."""
     print_banner()
-    client = DuoClient()
-    username = client.username or "guest"
+    # Initial display data — will be refreshed each loop iteration
+    _initial_client = DuoClient()
+    _initial_user = _initial_client.username or get_username() or "guest"
+    _initial_preset = get_preset_language() or "es"
 
     console.print()
     console.print("[bold bright_green]🦉 DUO INTERACTIVE SHELL[/]")
     console.print(f"[dim green]{DIVIDER_LINE}[/]")
-    preset = get_preset_language() or "es"
-    console.print(f"  Active User : [bold bright_white]@{username}[/]   Course: [bold bright_cyan]{preset.upper()}[/]")
+    console.print(f"  Active User : [bold bright_white]@{_initial_user}[/]   Course: [bold bright_cyan]{_initial_preset.upper()}[/]")
     console.print("  Type 'help' for commands, 'exit' to quit.")
     console.print(f"[dim green]{DIVIDER_LINE}[/]\n")
 
@@ -381,11 +454,9 @@ def shell_cmd() -> None:
         "status": status_cmd,
         "courses": courses_cmd,
         "calendar": calendar_cmd,
-        "quests": quests_cmd,
         "shop": shop_cmd,
         "freeze": freeze_cmd,
         "switch": switch_cmd,
-        "vocab": vocab_cmd,
         "profile": profile_cmd,
         "friends": friends_cmd,
         "practice": practice_cmd,
@@ -396,14 +467,35 @@ def shell_cmd() -> None:
 
     while True:
         try:
-            prompt_str = f"[bold bright_green]🦉 duo:{username}/{get_preset_language() or 'es'}[/] > "
+            # Refresh username/preset each iteration so switch/login reflect immediately
+            cur_user = get_username() or "guest"
+            cur_preset = get_preset_language() or "es"
+            prompt_str = f"[bold bright_green]🦉 duo:{cur_user}/{cur_preset}[/] > "
             raw = Prompt.ask(prompt_str).strip()
             if not raw:
                 continue
+            # Shell safety: hard cap on input length and reject control chars
+            if len(raw) > 500:
+                print_error("Input too long — max 500 chars")
+                continue
+            if "\r" in raw or "\n" in raw or "\0" in raw:
+                print_error("Invalid input — control characters not allowed")
+                continue
 
-            parts = raw.split()
+            try:
+                parts = shlex.split(raw, posix=True)
+            except ValueError as e:
+                print_error(f"Could not parse input: {e}")
+                continue
+            if not parts:
+                continue
             cmd_name = parts[0].lower()
+            # Allow only known commands plus shell builtins — no OS execution
             args = parts[1:]
+            # Truncate args to prevent abuse
+            if len(args) > 20:
+                print_error("Too many arguments — max 20")
+                continue
 
             if cmd_name in ["exit", "quit", "q"]:
                 console.print("[bold yellow]Goodbye! Happy learning! 🦉[/]")
@@ -420,26 +512,16 @@ def shell_cmd() -> None:
                     elif cmd_name == "profile" and args:
                         ctx.invoke(cmd_map[cmd_name], username=args[0])
                     elif cmd_name == "auto":
-                        # Support parsing flags inside shell
-                        fast = "--fast" in args
-                        until_goal = "-g" in args or "--until-goal" in args
-                        loop = "-L" in args or "--loop" in args
-                        sessions = 1
-                        target_xp = None
-                        lang = None
-                        max_sessions = None
-
-                        for i, a in enumerate(args):
-                            if a in ["-s", "--sessions"] and i + 1 < len(args) and args[i + 1].isdigit():
-                                sessions = int(args[i + 1])
-                            elif a in ["-x", "--target-xp"] and i + 1 < len(args) and args[i + 1].isdigit():
-                                target_xp = int(args[i + 1])
-                            elif a in ["-l", "--lang"] and i + 1 < len(args):
-                                lang = args[i + 1]
-                            elif a in ["-m", "--max-sessions"] and i + 1 < len(args) and args[i + 1].isdigit():
-                                max_sessions = int(args[i + 1])
-
-                        ctx.invoke(cmd_map[cmd_name], sessions=sessions, target_xp=target_xp, until_goal=until_goal, loop=loop, lang=lang, fast=fast, max_sessions=max_sessions)
+                        p = _parse_shell_auto_args(args)
+                        ctx.invoke(
+                            cmd_map[cmd_name],
+                            sessions=p["sessions"],
+                            target_xp=p["target_xp"],
+                            until_goal=p["until_goal"],
+                            loop=p["loop"],
+                            lang=p["lang"],
+                            max_sessions=p["max_sessions"],
+                        )
                     elif cmd_name == "switch" and args:
                         ctx.invoke(cmd_map[cmd_name], language_code=args[0])
                     else:
@@ -454,10 +536,32 @@ def shell_cmd() -> None:
 
 
 def main() -> None:
+    """Entrypoint with crash-proof error handling — never dumps a traceback for user errors."""
     try:
-        cli()
+        # standalone_mode=False lets us control rendering; click returns exit_code
+        # for Exit exceptions instead of calling sys.exit.
+        result = cli(standalone_mode=False)
+        # click returns exit_code (int) for ctx.exit() paths; propagate it
+        if isinstance(result, int) and result != 0:
+            sys.exit(result)
+    except click.ClickException as e:
+        # Any remaining ClickException not caught by DuoGroup (e.g. BadParameter)
+        # — show as friendly TUI error, no traceback.
+        print_error(e.format_message())
+        console.print("[dim]Run [bold]duo help[/] for usage.[/dim]\n")
+        sys.exit(e.exit_code)
+    except SystemExit as e:
+        # Click uses SystemExit for --help / normal exits (code 0) and for
+        # error exits (code 2). Re-raise correctly without extra output.
+        raise
     except Exception as e:
         print_error(f"Fatal error: {e}")
+        # Only dump traceback when explicitly debugging — never by default
+        if os.getenv("DUO_DEBUG"):
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

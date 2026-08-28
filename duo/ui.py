@@ -1,7 +1,12 @@
 """
-Ultra-Clean, Modern Borderless TUI for duo-cli.
-Designed with sleek horizontal dividers (box.HORIZONTALS) and clean CLI typography.
-Eliminates all vertical side borders (no glyph width mismatch or broken box corners across any terminal).
+Clean, minimal TUI for duo-cli — no box borders, no heavy chrome.
+
+Design goals:
+- No `rich.box` borders at all — tables use `box=None`, cards use spacing +
+  typography + subtle dim separators only. This avoids any glyph/encoding
+  issues and keeps the output scannable.
+- Consistent accent colors, clear section titles, and generous padding so
+  the eye can parse content without relying on grid lines.
 """
 
 import sys
@@ -15,51 +20,122 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from rich import box
 from rich.console import Console
 from rich.table import Table
 
 from .api import get_flag
 
-console = Console(file=sys.stdout, force_terminal=True, highlight=False)
+
+class _DynamicStdout:
+    """File-like proxy that always writes to the current sys.stdout (capturable by CliRunner)."""
+
+    def write(self, text: str) -> int:
+        return sys.stdout.write(text)
+
+    def flush(self) -> None:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+    def isatty(self) -> bool:
+        try:
+            return sys.stdout.isatty()  # type: ignore[attr-defined]
+        except Exception:
+            return False
+
+
+console = Console(file=_DynamicStdout(), highlight=False, force_terminal=True)
 
 DIVIDER_LINE = "─" * 56
+SECTION_SEP = "─" * 56
+
+
+def _get_version() -> str:
+    """Single source of truth for version — duo.__version__ first (dev), then installed metadata."""
+    try:
+        from . import __version__ as _v
+
+        return str(_v)
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version as _pkg_version
+
+        return _pkg_version("duo-cli")
+    except Exception:
+        return "1.1.0"
+
+
+__version__ = _get_version()
 
 # --- LOGO BANNER ---
-
-DUO_BANNER = r"""[bold bright_green]
+# Built dynamically so banner always matches the installed package version.
+_BANNER_ART = r"""[bold bright_green]
   ██████╗  ██╗   ██╗  ██████╗         ██████╗ ██╗     ██╗
   ██╔══██╗ ██║   ██║ ██╔═══██╗       ██╔════╝ ██║     ██║
   ██║  ██║ ██║   ██║ ██║   ██║ █████╗██║      ██║     ██║
   ██║  ██║ ██║   ██║ ██║   ██║ ╚════╝██║      ██║     ██║
   ██████╔╝ ╚██████╔╝ ╚██████╔╝       ╚██████╗ ███████╗██║
-  ╚═════╝   ╚═════╝   ╚═════╝         ╚═════╝ ╚══════╝╚═╝[/] [bold bright_yellow]v1.0.0[/]
-  [dim cyan]─── Duolingo Terminal Interface & Automated Learning Engine ───[/]
-"""
+  ╚═════╝   ╚═════╝   ╚═════╝         ╚═════╝ ╚══════╝╚═╝[/]"""
+_BANNER_TAGLINE = "  [dim cyan]─── Duolingo Terminal Interface & Automated Learning Engine ───[/]"
+
+
+def _build_banner() -> str:
+    return f"{_BANNER_ART} [bold bright_yellow]v{__version__}[/]\n{_BANNER_TAGLINE}"
+
+
+DUO_BANNER = _build_banner()
 
 
 def print_banner() -> None:
-    console.print(DUO_BANNER)
+    # Rebuild each time in case version was mocked in tests
+    console.print(_build_banner())
 
 
 def print_success(message: str) -> None:
-    console.print(f"[bold bright_green][OK][/] {message}")
+    console.print(f"[bold bright_green]✔ {message}[/]")
 
 
 def print_error(message: str) -> None:
-    console.print(f"[bold bright_red][ERROR][/] {message}")
+    console.print(f"[bold bright_red]✘ {message}[/]")
 
 
 def print_warning(message: str) -> None:
-    console.print(f"[bold bright_yellow][WARN][/] {message}")
+    console.print(f"[bold bright_yellow]⚠ {message}[/]")
 
 
 def print_info(message: str) -> None:
-    console.print(f"[bold cyan][INFO][/] {message}")
+    console.print(f"[bold cyan]ℹ {message}[/]")
+
+
+# ---- helpers for borderless tables ----
+
+def _make_table(title: str) -> Table:
+    """Create a borderless table — no box, just clean columns and padding."""
+    t = Table(
+        title=f"[bold bright_cyan]{title}[/]",
+        title_style="bold bright_cyan",
+        title_justify="left",
+        box=None,
+        show_header=True,
+        header_style="bold bright_cyan",
+        pad_edge=False,
+        padding=(0, 2),
+        collapse_padding=True,
+        show_lines=False,
+    )
+    return t
+
+
+def _print_section_title(title: str, subtitle: str = "") -> None:
+    console.print()
+    console.print(f"[bold bright_cyan]{title}[/]" + (f"  [dim]{subtitle}[/dim]" if subtitle else ""))
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
 def render_status(data: Dict[str, Any], user_data: Optional[Dict[str, Any]] = None) -> None:
-    """Render a clean, modern, borderless status dashboard with dynamic streak effects."""
+    """Minimal dashboard — typography + spacing, no borders."""
     streak = data.get("site_streak", 0)
     streak_extended = data.get("streak_extended_today", False)
     gems = data.get("gems", 0)
@@ -77,89 +153,65 @@ def render_status(data: Dict[str, Any], user_data: Optional[Dict[str, Any]] = No
     else:
         course_display = "Spanish [ES]"
 
-    streak_badge = "[bold white on dark_green] ✓ COMPLETED TODAY [/]" if streak_extended else "[bold white on dark_red] ⌛ INCOMPLETE [/]"
-    div_color = "bright_green" if streak_extended else "bright_red"
-
-    if streak_extended:
-        effect_msg = f"[bold bright_green]🔥 Streak Active & Secured Today! Great job, @{username}![/]"
-    else:
-        effect_msg = f"[bold bright_red]⚠️  Streak expires tonight! Run 'duo auto' to keep it![/]"
+    streak_badge = "[bold white on dark_green]  ✓ COMPLETED TODAY  [/]" if streak_extended else "[bold white on dark_red]  ⌛ INCOMPLETE  [/]"
+    accent = "bright_green" if streak_extended else "bright_red"
+    effect_msg = (
+        f"[bold bright_green]🔥 Streak secured today — great job, @{username}![/]"
+        if streak_extended else
+        f"[bold bright_yellow]⚠ Streak expires tonight — run [bright_white]duo auto[/] to keep it![/]"
+    )
 
     console.print()
-    console.print("[bold bright_cyan]🦉 DUOLINGO DASHBOARD[/]")
-    console.print(f"[{div_color}]{DIVIDER_LINE}[/]")
-    console.print(f"  [bold bright_white]Course[/]        : [bold bright_cyan]{course_display}[/]")
-    console.print(f"  [bold bright_white]Daily Streak[/]  : [bold bright_yellow]{streak} Days[/]   {streak_badge}")
-    console.print(f"  [bold bright_white]Total XP[/]      : [bold bright_magenta]{total_xp:,} XP[/]")
-    console.print(f"  [bold bright_white]Gems Balance[/]  : [bold bright_yellow]{gems:,} Gems[/]")
-    console.print(f"[{div_color}]{DIVIDER_LINE}[/]")
+    console.print(f"[bold bright_cyan]🦉  DUOLINGO DASHBOARD[/]  [dim]@{username}[/dim]")
+    console.print(f"[{accent} dim]{SECTION_SEP}[/]")
+    console.print(f"  [dim]Course[/dim]         [bold bright_cyan]{course_display}[/]")
+    console.print(f"  [dim]Streak[/dim]         [bold bright_yellow]{streak} days[/]  {streak_badge}")
+    console.print(f"  [dim]Total XP[/dim]       [bold bright_magenta]{total_xp:,} XP[/]")
+    console.print(f"  [dim]Gems[/dim]           [bold bright_yellow]{gems:,}[/]")
+    console.print(f"[{accent} dim]{SECTION_SEP}[/]")
     console.print(f"  {effect_msg}")
     console.print()
 
 
 def render_calendar(calendar_data: List[Dict[str, Any]]) -> None:
-    table = Table(
-        title="[bold bright_cyan]ACTIVITY & STREAK (Last 14 Days)[/]",
-        box=box.HORIZONTALS,
-        header_style="bold bright_cyan",
-        show_header=True
-    )
-    table.add_column("Date", style="bold white")
+    table = _make_table("ACTIVITY  ·  LAST 14 DAYS")
+    table.add_column("Date", style="bold white", no_wrap=True)
     table.add_column("Day", justify="center", style="bright_blue")
     table.add_column("Status", justify="center")
-    table.add_column("XP Gained", justify="right", style="bright_magenta")
+    table.add_column("XP", justify="right", style="bright_magenta")
 
     for day in calendar_data:
         date_str = day["date"]
         day_name = day["day_name"]
-        xp = f"+{day['xp']} XP" if day['xp'] > 0 else "[dim]0 XP[/dim]"
-        status = "[bold bright_green]ACTIVE[/]" if day["is_active"] else "[dim]INACTIVE[/]"
+        xp = f"[bold bright_green]+{day['xp']} XP[/]" if day['xp'] > 0 else "[dim]0 XP[/dim]"
+        status = "[bold bright_green]● active[/]" if day["is_active"] else "[dim]○ inactive[/dim]"
         if day["is_today"]:
-            date_str = f"[bold bright_yellow]👉 {date_str} (TODAY)[/]"
-
+            date_str = f"[bold bright_yellow]› {date_str}  today[/]"
         table.add_row(date_str, day_name, status, xp)
 
     console.print(table)
-
-
-def render_quests(quests: List[Dict[str, Any]]) -> None:
-    table = Table(
-        title="[bold bright_cyan]DAILY QUESTS & GOALS[/]",
-        box=box.HORIZONTALS,
-        header_style="bold bright_cyan",
-        show_header=True
-    )
-    table.add_column("Quest / Goal", style="bold white")
-    table.add_column("Progress", justify="center", style="bright_yellow")
-    table.add_column("Status", justify="center")
-    table.add_column("Reward", justify="right", style="bright_magenta")
-
-    for q in quests:
-        prog = f"{q['progress']}/{q['target']}"
-        status = "[bold bright_green]✓ DONE[/]" if q["completed"] else "[dim]⌛ IN PROG[/]"
-        reward_clean = str(q["reward"]).replace("🎁 ", "").replace("🔥 ", "").replace("💎 ", "")
-        table.add_row(q["title"], prog, status, reward_clean)
-
-    console.print(table)
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
 def render_shop(items: List[Dict[str, Any]], user_gems: int) -> None:
-    table = Table(
-        title=f"[bold bright_cyan]DUOLINGO SHOP (Balance: {user_gems:,} Gems)[/]",
-        box=box.HORIZONTALS,
-        header_style="bold bright_cyan",
-        show_header=True
-    )
+    # header line outside table for balance — more scannable without borders
+    console.print()
+    console.print(f"[bold bright_cyan]SHOP[/]  [dim]balance[/dim] [bold bright_yellow]{user_gems:,} gems[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+
+    table = _make_table("")
+    table.title = None
     table.add_column("Item", style="bold white")
-    table.add_column("Price", justify="right", style="bold yellow")
-    table.add_column("Description", style="white")
+    table.add_column("Price", justify="right", style="bold bright_yellow")
+    table.add_column("Description", style="dim white")
 
     for it in items:
         name = str(it["name"])
-        cost = f"{it['cost']} Gems"
+        cost = f"{it['cost']} gems"
         table.add_row(name, cost, it["desc"])
 
     console.print(table)
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
 def render_courses_table(courses: List[Dict[str, Any]]) -> None:
@@ -167,13 +219,8 @@ def render_courses_table(courses: List[Dict[str, Any]]) -> None:
         print_info("No enrolled courses found.")
         return
 
-    table = Table(
-        title="[bold bright_cyan]ENROLLED COURSES[/]",
-        box=box.HORIZONTALS,
-        header_style="bold bright_cyan",
-        show_header=True
-    )
-    table.add_column("Status", justify="center")
+    table = _make_table("ENROLLED COURSES")
+    table.add_column("", justify="center", no_wrap=True)
     table.add_column("Course", style="bold white")
     table.add_column("Code", justify="center", style="bright_cyan")
     table.add_column("Total XP", justify="right", style="bright_magenta")
@@ -188,20 +235,20 @@ def render_courses_table(courses: List[Dict[str, Any]]) -> None:
 
     for c in unique_courses:
         is_curr = c.get("is_current", False)
-        status = "[bold bright_green]ACTIVE[/]" if is_curr else "[dim]Enrolled[/]"
+        status = "[bold bright_green]● active[/]" if is_curr else "[dim]○ enrolled[/dim]"
         title = c.get('title', 'Unknown')
-        code = f"[{c.get('language', '').upper()}]"
+        code = c.get('language', '').upper()
         xp = f"{c.get('xp', 0):,} XP"
-
         table.add_row(status, title, code, xp)
 
     console.print(table)
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
 def render_profile(profile: Dict[str, Any]) -> None:
     username = profile.get("username", "Unknown")
     name = profile.get("name") or profile.get("fullname") or username
-    bio = profile.get("bio") or "[italic dim]No bio set[/]"
+    bio = profile.get("bio") or "[dim italic]No bio set[/]"
     streak = profile.get("streak", 0)
     total_xp = profile.get("totalXp", profile.get("contribution_points", 0))
     learning_lang = profile.get("learningLanguage", "Unknown").upper()
@@ -221,47 +268,15 @@ def render_profile(profile: Dict[str, Any]) -> None:
             created_str = str(creation_date)[:10]
 
     console.print()
-    console.print(f"[bold bright_cyan]👤 PROFILE: @{username}[/]")
-    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
-    console.print(f"  [bold bright_white]Full Name[/]     : [bold bright_white]{name}[/]")
-    console.print(f"  [bold bright_white]Username[/]      : [bold bright_cyan]@{username}[/]")
-    console.print(f"  [bold bright_white]Daily Streak[/]  : [bold bright_yellow]{streak} Days[/]")
-    console.print(f"  [bold bright_white]Total XP[/]      : [bold bright_magenta]{total_xp:,} XP[/]")
-    console.print(f"  [bold bright_white]Learning[/]      : [bold bright_green]{learning_lang}[/] (from {from_lang})")
-    console.print(f"  [bold bright_white]Member Since[/]  : {created_str}")
-    console.print(f"  [bold bright_white]Bio[/]           : {bio}")
-    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
+    console.print(f"[bold bright_cyan]👤  @{username}[/]  [dim]{name}[/dim]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print(f"  [dim]Streak[/dim]        [bold bright_yellow]{streak} days[/]")
+    console.print(f"  [dim]Total XP[/dim]      [bold bright_magenta]{total_xp:,} XP[/]")
+    console.print(f"  [dim]Learning[/dim]      [bold bright_green]{learning_lang}[/]  [dim]from {from_lang}[/dim]")
+    console.print(f"  [dim]Member since[/dim]  [white]{created_str}[/]")
+    console.print(f"  [dim]Bio[/dim]           {bio}")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
     console.print()
-
-
-def render_vocabulary_table(vocab: List[Dict[str, Any]], limit: int = 50) -> None:
-    if not vocab:
-        print_info("No vocabulary data available for this language.")
-        return
-
-    table = Table(
-        title=f"[bold bright_cyan]LEARNED VOCABULARY ({len(vocab)} words total)[/]",
-        box=box.HORIZONTALS,
-        header_style="bold bright_cyan",
-        show_header=True
-    )
-    table.add_column("Word", style="bold bright_white")
-    table.add_column("Category", style="bright_yellow")
-    table.add_column("Strength", justify="center")
-    table.add_column("Last Practiced", style="dim")
-
-    for item in vocab[:limit]:
-        word = item.get("word_string") or item.get("normalized_string") or "Unknown"
-        pos = item.get("pos") or item.get("skill_title") or "Word"
-        strength = float(item.get("strength_bars", item.get("strength", 1.0)))
-
-        bars = int(strength * 4) if strength <= 1.0 else min(int(strength), 4)
-        strength_bar = "[bold bright_green]" + "█" * bars + "[/][dim]" + "░" * (4 - bars) + "[/]"
-        last_practiced = str(item.get("last_practiced", item.get("last_practiced_ms", "N/A")))[:10]
-
-        table.add_row(word, str(pos), strength_bar, last_practiced)
-
-    console.print(table)
 
 
 def render_friends_table(friends: List[Dict[str, Any]]) -> None:
@@ -269,12 +284,7 @@ def render_friends_table(friends: List[Dict[str, Any]]) -> None:
         print_info("You are not following any friends yet.")
         return
 
-    table = Table(
-        title="[bold bright_cyan]FRIENDS & FOLLOWING[/]",
-        box=box.HORIZONTALS,
-        header_style="bold bright_cyan",
-        show_header=True
-    )
+    table = _make_table("FRIENDS & FOLLOWING")
     table.add_column("User", style="bold white")
     table.add_column("Total XP", justify="right", style="bright_magenta")
     table.add_column("Streak", justify="center", style="bright_yellow")
@@ -284,57 +294,55 @@ def render_friends_table(friends: List[Dict[str, Any]]) -> None:
         name = f.get("name")
         display = f"@{username}" if not name else f"{name} (@{username})"
         xp = f"{f.get('points', 0):,} XP"
-        streak = f"{f.get('streak', 0)} Days" if "streak" in f else "—"
-
+        streak = f"{f.get('streak', 0)} days" if "streak" in f else "—"
         table.add_row(display, xp, streak)
 
     console.print(table)
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
 # --- HELP MENU RENDERER ---
 
 def render_help() -> None:
-    """Render a clean, modern, borderless categorized Help listing and Examples."""
+    """Categorized help — spacing + color only, no borders."""
     console.print()
-    console.print("[bold bright_cyan]🦉 DUOLINGO COMMANDS[/]")
-    console.print("[dim cyan]──────────────────────────────────────────────────────────────────[/]")
+    console.print("[bold bright_cyan]🦉  DUOLINGO COMMANDS[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
 
     sections = [
-        ("AUTOMATION", "Auto-solve & interactive practice", [
-            ("auto", "Automate practice lessons with natural pauses (Flags: -s, -g, -x, -L, -m, --fast)"),
-            ("practice", "Interactive full lesson practice session in terminal (Flags: -l)")
+        ("AUTOMATION", "auto-solve & interactive practice", [
+            ("auto", "Automate practice lessons  [dim](-s, -g, -x, -L, -m)[/dim]  ·  1-2s / q, 20-50s between"),
+            ("practice", "Interactive lesson in the terminal  [dim](-l)[/dim]"),
         ]),
-        ("STATS & PROGRESS", "Streak, courses, and quests", [
-            ("status", "Overview dashboard: streak, course, XP, gems"),
-            ("calendar", "14-day streak visualizer & XP history heatmap (Flags: -d)"),
+        ("STATS & PROGRESS", "streak, courses, and dashboard", [
+            ("status", "Overview dashboard — streak, course, XP, gems"),
+            ("calendar", "Streak heatmap & XP history  [dim](-d)[/dim]"),
             ("courses", "List enrolled languages and total XP"),
-            ("quests", "View daily quests and streak challenge goals"),
-            ("vocab", "Browse learned vocabulary & word strength (Flags: -l, -n)")
         ]),
-        ("PROFILE & USER", "Account info and friend network", [
-            ("profile", "Display user profile card and stats"),
-            ("friends", "View friends and following rankings"),
-            ("whoami", "Show current authenticated account")
+        ("PROFILE & SOCIAL", "account and network", [
+            ("profile", "User profile card and stats"),
+            ("friends", "Friends and following leaderboard"),
+            ("whoami", "Show current authenticated account"),
         ]),
-        ("STORE & SESSION", "Shop items, streak freeze, and settings", [
-            ("shop", "Browse shop items and gem balances"),
-            ("freeze", "Purchase & equip Streak Freeze (200 gems)"),
-            ("switch <lang>", "Switch active learning course (e.g. duo switch es)"),
+        ("STORE & SESSION", "shop, streak freeze, and settings", [
+            ("shop", "Browse shop items and gem balance"),
+            ("freeze", "Buy & equip Streak Freeze  [dim](200 gems)[/dim]"),
+            ("switch <lang>", "Switch active course  [dim](e.g. duo switch es)[/dim]"),
             ("login / logout", "Connect or disconnect Duolingo account"),
-            ("shell", "Launch interactive Duo REPL shell")
-        ])
+            ("shell", "Launch interactive REPL shell"),
+        ]),
     ]
 
     for sec_title, sec_desc, cmds in sections:
-        console.print(f"\n  [bold bright_yellow]{sec_title}[/] [dim]• {sec_desc}[/]")
+        console.print(f"\n  [bold bright_yellow]{sec_title}[/]  [dim]· {sec_desc}[/dim]")
         for cmd_name, cmd_desc in cmds:
             console.print(f"    [bold bright_green]{cmd_name:<18}[/] [white]{cmd_desc}[/]")
 
-    console.print("\n[bold bright_cyan]💡 QUICK EXAMPLES[/]")
-    console.print("[dim cyan]──────────────────────────────────────────────────────────────────[/]")
+    console.print("\n[bold bright_cyan]💡  QUICK EXAMPLES[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
     console.print("  [bright_green]duo[/]                    Show status dashboard")
     console.print("  [bright_green]duo auto -g[/]            Complete daily goal automatically")
-    console.print("  [bright_green]duo auto -L -m 20[/]       Run up to 20 sessions then stop (safer than endless -L)")
+    console.print("  [bright_green]duo auto -L -m 20[/]       Run up to 20 sessions then stop")
     console.print("  [bright_green]duo practice -l es[/]     Interactive Spanish lesson")
     console.print("  [bright_green]duo switch de[/]          Switch course to German")
     console.print("  [bright_green]duo shell[/]               Enter interactive shell")
@@ -345,59 +353,58 @@ def render_help() -> None:
 
 def render_auto_header(lang: str, sessions: int, target_xp: Optional[int], until_goal: bool, loop: bool = False) -> None:
     if loop:
-        goal_mode = "♾ Infinite Loop (runs forever)"
+        goal_mode = "∞  Infinite loop"
     else:
-        goal_mode = "Until Daily Goal is Met" if until_goal else (f"Target: {target_xp} XP" if target_xp else f"{sessions} Sessions")
+        goal_mode = "Until daily goal" if until_goal else (f"Target: {target_xp} XP" if target_xp else f"{sessions} session(s)")
     console.print()
-    console.print("[bold bright_green]⚡ DUOLINGO AUTO PRACTICE BOT[/]")
-    console.print(f"[dim green]{DIVIDER_LINE}[/]")
-    console.print(f"  Language : [bold bright_cyan]{lang.upper()}[/] | Mode: [bold bright_yellow]{goal_mode}[/]")
-    console.print("  [dim]Solving lessons automatically with natural randomized pauses...[/]")
+    console.print("[bold bright_green]⚡  AUTO PRACTICE[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print(f"  [dim]Language[/dim]  [bold bright_cyan]{lang.upper()}[/]   [dim]Mode[/dim]  [bold bright_yellow]{goal_mode}[/]")
+    console.print("  [dim]Solving with randomized human-like pauses…[/dim]")
     if loop:
-        console.print("  [dim]Runs endlessly until you press [bold]Ctrl+C[/bold]. A longer break is taken every 5 sessions.[/]")
+        console.print("  [dim]Runs until [bold]Ctrl+C[/] — longer break every 5 sessions.[/dim]")
     else:
-        console.print("  [dim]Press [bold]Ctrl+C[/bold] at any time to safely stop and save progress.[/]")
-    console.print(f"[dim green]{DIVIDER_LINE}[/]")
+        console.print("  [dim]Press [bold]Ctrl+C[/] to stop safely at any time.[/dim]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
     console.print()
 
 
 def render_auto_challenge(session_idx: int, total_sessions: int, q_idx: int, total_q: int, prompt: str, answer: str, delay: float) -> None:
-    sess_info = f"Session {session_idx}" if total_sessions <= 1 else f"Session {session_idx}/{total_sessions}"
+    sess_info = f"S{session_idx}" if total_sessions <= 1 else f"S{session_idx}/{total_sessions}"
     console.print(
-        f"  [dim cyan]•[/] [bold bright_white][{sess_info} | Q {q_idx:02d}/{total_q:02d}][/] "
-        f"[white]{prompt[:40]}[/] [dim]→[/] [bold bright_green]{answer[:35]}[/] "
-        f"[dim]({delay:.1f}s)[/]"
+        f"  [dim]›[/dim] [bold white][{sess_info}  Q{q_idx:02d}/{total_q:02d}][/] "
+        f"[white]{prompt[:44]}[/] [dim]→[/] [bold bright_green]{answer[:36]}[/] "
+        f"[dim]{delay:.1f}s[/dim]"
     )
 
 
 def render_auto_session_result(session_idx: int, xp_gained: int, streak_extended: bool, total_xp_earned: int) -> None:
-    streak_msg = "🔥 Streak Maintained!" if streak_extended else ""
+    streak_msg = "[bold bright_green]🔥 streak kept[/]" if streak_extended else ""
     console.print(
-        f"  [bold bright_green]✔ Session {session_idx} Complete![/] "
-        f"[bold bright_yellow]+{xp_gained} XP[/] {streak_msg} "
-        f"[dim](Total earned this run: +{total_xp_earned} XP)[/]\n"
+        f"  [bold bright_green]✔ Session {session_idx} done[/]  "
+        f"[bold bright_yellow]+{xp_gained} XP[/]  {streak_msg}  "
+        f"[dim](total +{total_xp_earned} XP)[/dim]"
     )
+    console.print()
 
 
 def render_auto_summary(sessions_completed: int, total_xp: int, streak_days: int, streak_extended: bool) -> None:
     if streak_extended:
-        status_str = f"[bold bright_yellow]🔥 {streak_days} Days[/] [bold bright_green](✓ Streak Active & Protected Today!)[/]"
-        congrats = "  [bold bright_green]🎉 Great job! Your streak has been safely extended for today! 🚀[/]\n"
+        status_str = f"[bold bright_yellow]🔥 {streak_days} days[/]  [bold bright_green]✓ secured today[/]"
+        congrats = "[bold bright_green]🎉  Streak extended — great job![/]\n"
     else:
-        status_str = f"[bold bright_yellow]{streak_days} Days[/]"
+        status_str = f"[bold bright_yellow]{streak_days} days[/]"
         congrats = ""
 
     console.print()
-    console.print("[bold bright_green]⚡ AUTO PRACTICE SUMMARY[/]")
-    console.print(f"[dim green]{DIVIDER_LINE}[/]")
-    console.print("  [bold bright_white]Status[/]            : [bold bright_green]Completed Successfully![/]")
-    console.print(f"  [bold bright_white]Sessions Finished[/] : [bold bright_cyan]{sessions_completed}[/]")
-    console.print(f"  [bold bright_white]Total XP Gained[/]   : [bold bright_green]+{total_xp} XP[/]")
-    console.print(f"  [bold bright_white]Current Streak[/]    : {status_str}")
+    console.print("[bold bright_green]⚡  AUTO SUMMARY[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print(f"  [dim]Sessions[/dim]       [bold bright_cyan]{sessions_completed}[/]")
+    console.print(f"  [dim]Total XP[/dim]       [bold bright_green]+{total_xp} XP[/]")
+    console.print(f"  [dim]Streak[/dim]         {status_str}")
     if congrats:
-        console.print()
-        console.print(congrats, end="")
-    console.print(f"[dim green]{DIVIDER_LINE}[/]")
+        console.print(f"  {congrats}", end="")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
     console.print()
 
 
@@ -409,7 +416,7 @@ def _hearts_bar(hearts: int) -> str:
 
 
 def _combo_badge(combo: int) -> str:
-    return f"  [bold bright_yellow]🔥 COMBO x{combo}[/]" if combo >= 2 else ""
+    return f"  [bold bright_yellow]🔥 ×{combo}[/]" if combo >= 2 else ""
 
 
 def render_question_card(
@@ -422,30 +429,31 @@ def render_question_card(
     lang_code: Optional[str],
     q_type: str = "",
 ) -> None:
-    """Render a single practice question as a clean, borderless Duolingo-style card."""
+    """Single question — header line + prompt + numbered choices, no borders."""
     flag = get_flag(lang_code)
     type_label = ""
     if q_type:
         pretty = {
-            "translate": "Translation",
-            "assist": "Translation",
-            "select": "Multiple Choice",
-            "gapFill": "Fill the Blank",
-            "match": "Matching",
+            "translate": "Translate",
+            "assist": "Translate",
+            "select": "Multiple choice",
+            "gapFill": "Fill the blank",
+            "match": "Match",
         }.get(q_type, q_type)
-        type_label = f"  [dim]{pretty}[/]"
+        type_label = f"  [dim]· {pretty}[/dim]"
 
     console.print()
     console.print(
-        f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]{type_label}"
-        f"   {_hearts_bar(hearts)}{_combo_badge(combo)}"
+        f"{flag}  [bold white]Q{q_idx}/{total_q}[/]{type_label}"
+        f"    {_hearts_bar(hearts)}{_combo_badge(combo)}"
     )
-    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
-    console.print(f"  [bold bright_white]{prompt}[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print(f"  [bold white]{prompt}[/]")
+    console.print()
     if choices:
         for i, c in enumerate(choices, 1):
-            console.print(f"  [bold bright_yellow]{i}.[/] [white]{c}[/]")
-    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
+            console.print(f"  [bold bright_yellow]{i}.[/]  [white]{c}[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
 def render_freeform_card(
@@ -457,18 +465,17 @@ def render_freeform_card(
     lang_code: Optional[str],
     q_type: str = "",
 ) -> None:
-    """Render a free-text (typed) question as a clean, borderless card."""
     flag = get_flag(lang_code)
     console.print()
     console.print(
-        f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]"
-        f"   {_hearts_bar(hearts)}{_combo_badge(combo)}"
+        f"{flag}  [bold white]Q{q_idx}/{total_q}[/]"
+        f"    {_hearts_bar(hearts)}{_combo_badge(combo)}"
     )
-    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
-    console.print(f"  [bold bright_white]{prompt}[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print(f"  [bold white]{prompt}[/]")
     console.print()
-    console.print("  [dim]✎ Type your answer below ↓[/]")
-    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
+    console.print("  [dim]✎  Type your answer below[/dim]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
 def render_match_panel(
@@ -480,30 +487,25 @@ def render_match_panel(
     combo: int,
     lang_code: Optional[str],
 ) -> None:
-    """Render a single matching sub-round as a clean, borderless card."""
     flag = get_flag(lang_code)
     console.print()
     console.print(
-        f"{flag} [bold bright_cyan]Match {p_idx}/{total_pairs}[/]"
-        f"   {_hearts_bar(hearts)}{_combo_badge(combo)}"
+        f"{flag}  [bold bright_cyan]Match {p_idx}/{total_pairs}[/]"
+        f"    {_hearts_bar(hearts)}{_combo_badge(combo)}"
     )
-    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
-    console.print(f"  [bold bright_yellow]{left_word}[/]  [dim]⇄ choose its translation below[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print(f"  [bold bright_yellow]{left_word}[/]  [dim]⇄  pick its translation[/dim]")
+    console.print()
     for i, o in enumerate(options, 1):
-        console.print(f"  [bold bright_yellow]{i}.[/] [white]{o}[/]")
-    console.print(f"[dim cyan]{DIVIDER_LINE}[/]")
+        console.print(f"  [bold bright_yellow]{i}.[/]  [white]{o}[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
 def render_answer_result(is_correct: bool, correct_answer: str, gained_xp: int = 10) -> None:
-    """Render a compact correct/incorrect feedback line after answering."""
     if is_correct:
-        console.print(
-            f"\n[bold bright_green]✔ Correct![/] [dim]+{gained_xp} XP[/] 🎉"
-        )
+        console.print(f"\n[bold bright_green]✔ Correct[/]  [dim]+{gained_xp} XP[/dim]  🎉")
     else:
-        console.print(
-            f"\n[bold bright_red]✖ Incorrect![/] [dim]Correct answer:[/] [bold green]{correct_answer}[/]"
-        )
+        console.print(f"\n[bold bright_red]✘ Incorrect[/]  [dim]answer:[/dim] [bold green]{correct_answer}[/]")
 
 
 def render_build_card(
@@ -516,17 +518,17 @@ def render_build_card(
     lang_code: Optional[str],
     q_type: str = "",
 ) -> None:
-    """Render a 'build the sentence' challenge with a numbered word bank."""
     flag = get_flag(lang_code)
     console.print()
     console.print(
-        f"{flag} [bold bright_white]Question {q_idx}/{total_q}[/]  [dim]Build Sentence[/]"
-        f"   {_hearts_bar(hearts)}{_combo_badge(combo)}"
+        f"{flag}  [bold white]Q{q_idx}/{total_q}[/]  [dim]· Build sentence[/dim]"
+        f"    {_hearts_bar(hearts)}{_combo_badge(combo)}"
     )
-    console.print(f"[dim magenta]{DIVIDER_LINE}[/]")
-    console.print(f"  [bold bright_white]{prompt}[/]")
-    for i, w in enumerate(word_bank, 1):
-        console.print(f"  [bold bright_yellow]{i}.[/] [white]{w}[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print(f"  [bold white]{prompt}[/]")
     console.print()
-    console.print("  [dim]Type the word numbers in order (e.g. 3 1 4 2) or type the sentence.[/]")
-    console.print(f"[dim magenta]{DIVIDER_LINE}[/]")
+    for i, w in enumerate(word_bank, 1):
+        console.print(f"  [bold bright_yellow]{i}.[/]  [white]{w}[/]")
+    console.print()
+    console.print("  [dim]Type numbers in order [yellow]3 1 4 2[/] or type the full sentence.[/dim]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")

@@ -8,7 +8,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from duo.cli import cli
+from duo.cli import main as duo_main
 
 if __name__ == "__main__":
-    cli()
+    duo_main()

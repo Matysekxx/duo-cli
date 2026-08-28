@@ -9,12 +9,19 @@ import logging
 from typing import Any, Dict, List, Optional
 import requests
 
+from urllib.parse import quote as url_quote
+
 from .config import get_jwt, get_username
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Constants — challenge taxonomy & i18n
+# ---------------------------------------------------------------------------
+
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
+# All text-based challenge types the terminal can handle
 TEXT_CHALLENGE_TYPES = [
     "assist", "characterIntro", "characterMatch", "characterPuzzle", "characterSelect",
     "characterTrace", "characterWrite", "completeReverseTranslation", "definition", "dialogue",
@@ -96,20 +103,31 @@ def get_flag(lang_code: Optional[str]) -> str:
 
 
 def sanitize_token(token: Optional[str]) -> Optional[str]:
-    """Clean and extract pure 3-part JWT token."""
-    if not token:
-        return None
-    token = token.strip()
-    if "jwt_token=" in token:
-        for part in token.split(";"):
-            part = part.strip()
-            if part.startswith("jwt_token="):
-                token = part.split("jwt_token=")[1].strip()
-                break
-    parts = token.split(".")
-    if len(parts) >= 3:
-        return ".".join(parts[:3])
-    return token
+    """Deprecated shim — delegates to config.sanitize_jwt for strict validation."""
+    from .config import sanitize_jwt
+    return sanitize_jwt(token)
+
+
+# ---------------------------------------------------------------------------
+# Small validation helpers — keep API guards readable & extensible
+# ---------------------------------------------------------------------------
+
+_LANG_RE = None  # lazy import to avoid circular deps at module load
+
+
+def _validate_lang_code(lang_code: str) -> str:
+    """Validate and normalize language code, raise DuoAPIError if bad."""
+    import re as _re
+
+    if not lang_code or not _re.match(r"^[a-z]{2,3}(-[a-z]{2,4})?$", lang_code, _re.IGNORECASE):
+        raise DuoAPIError(f"Invalid language code: {lang_code!r}")
+    return lang_code.lower()
+
+
+def _reject_control_chars(value: str, label: str = "value") -> None:
+    """Raise if value contains control chars that could break URLs/headers."""
+    if value and any(c in value for c in ("\r", "\n", "\0")):
+        raise DuoAPIError(f"Invalid {label} — contains control characters")
 
 
 class DuoAPIError(Exception):
@@ -360,8 +378,15 @@ class DuoClient:
     """Duolingo API wrapper running purely on direct, high-performance REST calls."""
 
     def __init__(self, username: Optional[str] = None, jwt_token: Optional[str] = None):
-        self.username = username or get_username()
-        self.jwt_token = sanitize_token(jwt_token or get_jwt())
+        # Prefer explicit args, otherwise load from secure config (already validated)
+        self.username = (username.strip() if isinstance(username, str) else None) or get_username()
+        raw_jwt = jwt_token if jwt_token is not None else get_jwt()
+        self.jwt_token = sanitize_token(raw_jwt)
+        # Defensive: guard against header/URL injection
+        if self.jwt_token:
+            _reject_control_chars(self.jwt_token, "JWT token")
+        if self.username:
+            _reject_control_chars(self.username, "username")
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": USER_AGENT,
@@ -388,14 +413,28 @@ class DuoClient:
         self._cached_user_data = None
 
     def request(self, method: str, url: str, **kwargs) -> requests.Response:
-        """Perform HTTP request with robust error handling."""
+        """Perform HTTP request with robust error handling and header-injection guard."""
+        # Only allow https to Duolingo — prevent SSRF via crafted url
+        if not url.startswith("https://www.duolingo.com/"):
+            raise DuoAPIError("Blocked request to non-Duolingo host")
+
         headers = kwargs.pop("headers", {})
+        # Reject header injection in custom headers
+        for hk, hv in list(headers.items()):
+            if "\r" in str(hk) or "\n" in str(hk) or "\r" in str(hv) or "\n" in str(hv):
+                raise DuoAPIError("Blocked header injection attempt")
         merged_headers = dict(self.session.headers)
         merged_headers.update(headers)
         if self.jwt_token and "Authorization" not in merged_headers:
             merged_headers["Authorization"] = f"Bearer {self.jwt_token}"
 
         timeout = kwargs.pop("timeout", 15)
+        # Clamp timeout to sane range
+        try:
+            timeout = float(timeout)
+            timeout = max(5.0, min(timeout, 30.0))
+        except Exception:
+            timeout = 15
         try:
             resp = self.session.request(method, url, headers=merged_headers, timeout=timeout, **kwargs)
             return resp
@@ -410,7 +449,7 @@ class DuoClient:
         if self._cached_user_data is not None and not force_refresh:
             return self._cached_user_data
 
-        url = f"https://www.duolingo.com/2017-06-30/users?username={self.username}"
+        url = f"https://www.duolingo.com/2017-06-30/users?username={url_quote(self.username, safe='')}"
         resp = self.request("GET", url)
         if resp.status_code in (401, 403):
             raise DuoAPIError("Invalid or expired JWT token. Run 'duo login' to enter a fresh token.")
@@ -435,7 +474,10 @@ class DuoClient:
 
     def get_public_user(self, username: str) -> Dict[str, Any]:
         """Fetch public profile info for any user (without requiring auth)."""
-        url = f"https://www.duolingo.com/2017-06-30/users?username={username}"
+        if not username or len(username) > 50:
+            raise DuoAPIError("Invalid username format")
+        _reject_control_chars(username, "username")
+        url = f"https://www.duolingo.com/2017-06-30/users?username={url_quote(username, safe='')}"
         resp = self.request("GET", url)
         if resp.status_code == 404:
             raise DuoAPIError(f"User '{username}' was not found.")
@@ -604,42 +646,6 @@ class DuoClient:
             "max_hearts": 5,
         }
 
-    def get_quests(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
-        """Fetch daily quests or challenges."""
-        user_data = self.verify_auth(force_refresh=force_refresh)
-        streak_info = self.get_streak_info(force_refresh=False)
-        quests = []
-
-        xp_goal = streak_info.get("daily_goal", 10)
-        xp_today = streak_info.get("xp_today", 0)
-        quests.append({
-            "title": f"Earn {xp_goal} XP today",
-            "progress": min(xp_today, xp_goal),
-            "target": xp_goal,
-            "completed": xp_today >= xp_goal,
-            "reward": "🎁 10 Gems",
-        })
-
-        extended = streak_info.get("streak_extended_today", False)
-        quests.append({
-            "title": "Complete 1 practice session or lesson",
-            "progress": 1 if extended else 0,
-            "target": 1,
-            "completed": extended,
-            "reward": "🔥 Streak Extension",
-        })
-
-        streak = streak_info.get("site_streak", 0)
-        quests.append({
-            "title": f"Reach {streak + (0 if extended else 1)} days streak",
-            "progress": streak,
-            "target": streak + (0 if extended else 1),
-            "completed": extended,
-            "reward": "💎 Streak Reward",
-        })
-
-        return quests
-
     def get_shop_items(self) -> List[Dict[str, Any]]:
         """Get list of authentic modern Duolingo store items and prices."""
         user_data = self.verify_auth(force_refresh=False)
@@ -672,18 +678,6 @@ class DuoClient:
             },
         ]
 
-    def get_vocabulary(self, language_abbr: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get user vocabulary / learned words via direct overview API."""
-        url = "https://www.duolingo.com/vocabulary/overview"
-        resp = self.request("GET", url)
-        if resp.status_code == 200:
-            try:
-                data = resp.json()
-                return data.get("vocab_overview", [])
-            except Exception:
-                return []
-        return []
-
     def get_friends(self) -> List[Dict[str, Any]]:
         """Get list of friends / following users."""
         user_data = self.verify_auth()
@@ -712,6 +706,7 @@ class DuoClient:
 
     def switch_language(self, lang_code: str) -> bool:
         """Switch active learning language."""
+        lang_code = _validate_lang_code(lang_code)
         self.invalidate_cache()
         user_data = self.verify_auth()
         user_id = user_data.get("id")
