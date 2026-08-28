@@ -48,6 +48,8 @@ class TestExtractMultipleChoice(unittest.TestCase):
         })
         self.assertEqual(r["choices"], ["kočka", "pes", "pták"])
         self.assertEqual(r["answer"], "kočka")
+        self.assertEqual(r["prompt"], "Translate: 'cat'")
+        self.assertNotIn("Spanish", r["prompt"])
 
     def test_radio_select_generic_fallback(self):
         r = extract_challenge_solution({
@@ -165,11 +167,11 @@ class TestLanguageResolution(unittest.TestCase):
         self.assertEqual(s.lang_code, "de")
 
     @mock.patch("duo.practice.get_preset_language", return_value=None)
-    def test_practice_falls_back_to_es_without_server_lang(self, _mock_preset):
+    def test_practice_falls_back_to_none_without_server_lang(self, _mock_preset):
         from duo.practice import PracticeSession
 
         s = PracticeSession(FakeClient(None), None)
-        self.assertEqual(s.lang_code, "es")
+        self.assertIsNone(s.lang_code)
 
     @mock.patch("duo.practice.get_preset_language", return_value="ja")
     def test_practice_uses_local_preset_over_server(self, _mock_preset):

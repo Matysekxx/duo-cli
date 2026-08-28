@@ -11,7 +11,7 @@ import requests
 
 from urllib.parse import quote as url_quote
 
-from .config import get_jwt, get_username
+from .config import get_jwt, get_preset_language, get_username
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +222,7 @@ def extract_challenge_solution(ch: Dict[str, Any]) -> Dict[str, Any]:
 
         elif ctype == "assist":
             if raw_prompt:
-                prompt = f"Translate to Spanish: '{raw_prompt}'"
+                prompt = f"Translate: '{raw_prompt}'"
 
         elif ctype in ["select", "characterSelect"]:
             if raw_prompt:
@@ -791,7 +791,7 @@ class DuoClient:
         self.invalidate_cache()
         user_data = self.verify_auth()
         user_id = user_data.get("id")
-        curr_lang = user_data.get("learningLanguage", "es")
+        curr_lang = user_data.get("learningLanguage") or get_preset_language() or "en"
 
         url = f"https://www.duolingo.com/2017-06-30/users/{user_id}/shop-items"
         resp = self.request("POST", url, json={"itemName": "streak_freeze", "learningLanguage": curr_lang})
@@ -876,7 +876,7 @@ class DuoClient:
         if not session_id or session_id == "dummy":
             try:
                 user_data = self.verify_auth()
-                lang = session_data.get("learningLanguage") or user_data.get("learningLanguage", "es")
+                lang = session_data.get("learningLanguage") or user_data.get("learningLanguage") or get_preset_language() or "en"
                 live_sess = self.create_practice_session(lang)
                 session_id = live_sess.get("id")
                 session_data = live_sess
