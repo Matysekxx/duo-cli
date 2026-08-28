@@ -388,7 +388,11 @@ def friends_cmd() -> None:
 @cli.command("leaderboard")
 @_require_auth
 def leaderboard_cmd() -> None:
-    """Show XP leaderboard — you + friends ranked by weekly XP."""
+    """Show weekly XP leaderboard.
+    
+    Retrieves the current user's profile and their friends list to build and render
+    a unified scoreboard ranked by weekly XP contributions.
+    """
     try:
         client = DuoClient()
         entries = client.get_leaderboard()

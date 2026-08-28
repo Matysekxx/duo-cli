@@ -728,10 +728,16 @@ class DuoClient:
         return []
 
     def get_leaderboard(self) -> List[Dict[str, Any]]:
-        """Return a ranked leaderboard: self + friends, sorted by weekly XP (falls back to total XP)."""
+        """Return a ranked leaderboard: self + friends, sorted by weekly XP (falls back to total XP).
+        
+        Fetches the authenticated user's current profile data, retrieves their friends,
+        combines them into a single list of candidates, and ranks them by 'xp_this_week'
+        descending. If weekly XP is equal or zero, ranks by total XP.
+        """
         user_data = self.verify_auth()
         friends = self.get_friends()
 
+        # Build entry for the current authenticated user (self)
         self_entry = {
             "rank": 0,
             "username": user_data.get("username", self.username or ""),
