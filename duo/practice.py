@@ -5,6 +5,7 @@ Interactive Practice and Automated Solver Engine with live Duolingo Server Sync 
 import random
 import time
 from typing import Any, Dict, List, Optional
+from rich.progress import Progress, BarColumn, TextColumn, MofNCompleteColumn
 from rich.prompt import Prompt
 
 from .api import AUDIO_CHALLENGE_TYPES, DuoAPIError, DuoClient, extract_challenge_solution, get_flag
@@ -175,6 +176,13 @@ class PracticeSession:
         console.print(f"[dim green]{DIVIDER_LINE}[/]\n")
 
         for idx, q in enumerate(questions, 1):
+            # Compact inline progress bar shown before each question
+            done = idx - 1
+            total_q = len(questions)
+            bar_filled = int((done / total_q) * 20) if total_q else 0
+            bar_str = "[bold bright_green]" + "█" * bar_filled + "[/][dim]" + "░" * (20 - bar_filled) + "[/]"
+            console.print(f"\n  {bar_str}  [dim]{done}/{total_q} done[/]")
+
             if self.hearts <= 0:
                 console.print("\n[bold bright_red]💔 You ran out of hearts! Practice session ended.[/]\n")
                 break

@@ -237,7 +237,11 @@ class TestUIVersion(unittest.TestCase):
         self.assertEqual(t.title, "[bold bright_cyan]TEST[/]")
 
     def test_render_funcs_do_not_crash(self):
-        from duo.ui import render_status, render_calendar, render_shop, render_courses_table, render_profile, render_friends_table
+        from duo.ui import (
+            render_status, render_calendar, render_shop, render_courses_table,
+            render_profile, render_friends_table, render_hearts, render_config,
+            render_leaderboard,
+        )
         # minimal smoke tests — should not raise
         render_status({"site_streak": 5, "streak_extended_today": True, "gems": 100, "total_xp": 1000, "current_course": {"title": "Spanish", "learningLanguage": "es"}}, {"username": "tester"})
         render_calendar([{"date": "2024-01-01", "day_name": "Mon", "is_today": True, "is_active": True, "xp": 10}])
@@ -245,6 +249,125 @@ class TestUIVersion(unittest.TestCase):
         render_courses_table([{"is_current": True, "title": "Spanish", "language": "es", "xp": 100}])
         render_profile({"username": "tester", "streak": 5, "totalXp": 100, "learningLanguage": "es", "fromLanguage": "en"})
         render_friends_table([{"username": "friend", "name": "Friend", "points": 100, "streak": 5}])
+        render_hearts({"hearts": 4, "is_unlimited": False, "max_hearts": 5})
+        render_hearts({"hearts": "Unlimited", "is_unlimited": True, "max_hearts": 5})
+        render_config({"username": "tester", "jwt": "eye...abc", "authenticated": "True"})
+        render_leaderboard([
+            {"rank": 1, "username": "me", "name": "Me", "xp_this_week": 200, "total_xp": 5000, "streak": 30, "is_self": True},
+            {"rank": 2, "username": "friend", "name": "Buddy", "xp_this_week": 100, "total_xp": 3000, "streak": 5, "is_self": False},
+        ])
+        render_leaderboard([])  # empty should not crash
+
+
+class TestNewCommands(unittest.TestCase):
+    def setUp(self):
+        self.runner = CliRunner()
+
+    def test_leaderboard_help(self):
+        from duo.cli import cli
+        result = self.runner.invoke(cli, ["leaderboard", "--help"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("leaderboard", result.output.lower())
+        self.assertNotIn("Traceback", result.output)
+
+    def test_hearts_help(self):
+        from duo.cli import cli
+        result = self.runner.invoke(cli, ["hearts", "--help"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertNotIn("Traceback", result.output)
+
+    def test_config_no_auth_does_not_crash(self):
+        """duo config should never crash even without a token."""
+        from duo.cli import cli
+        from unittest import mock
+        with mock.patch("duo.config.get_jwt", return_value=None), \
+             mock.patch("duo.config.get_username", return_value=None), \
+             mock.patch("duo.config.get_preset_language", return_value=None), \
+             mock.patch("duo.config.is_authenticated", return_value=False), \
+             mock.patch("duo.config.get_jwt_expiry", return_value=None):
+            result = self.runner.invoke(cli, ["config"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertNotIn("Traceback", result.output)
+
+    def test_export_help(self):
+        from duo.cli import cli
+        result = self.runner.invoke(cli, ["export", "--help"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("--format", result.output)
+
+    def test_version_shows_1_3(self):
+        from duo.cli import cli
+        result = self.runner.invoke(cli, ["--version"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("1.3.0", result.output)
+
+
+class TestCacheTTL(unittest.TestCase):
+    def test_cache_serves_fresh_data(self):
+        """Fresh cache (within TTL) should return cached data without HTTP."""
+        import time
+        from unittest.mock import MagicMock, patch
+        from duo.api import DuoClient
+
+        c = DuoClient(username="u", jwt_token="eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c")
+        c._cached_user_data = {"username": "u", "id": 1}
+        c._cache_timestamp = time.time()  # just set
+        with patch.object(c, "request") as mock_req:
+            result = c.verify_auth()
+        mock_req.assert_not_called()
+        self.assertEqual(result["username"], "u")
+
+    def test_stale_cache_fetches_fresh(self):
+        """Stale cache (past TTL) should make a new HTTP request."""
+        import time
+        from unittest.mock import MagicMock, patch
+        from duo.api import DuoClient
+
+        c = DuoClient(username="u", jwt_token="eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c")
+        c._cached_user_data = {"username": "u_old"}
+        c._cache_timestamp = time.time() - 200  # expired
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"users": [{"username": "u_fresh", "id": 2}]}
+        with patch.object(c, "request", return_value=mock_resp) as mock_req:
+            result = c.verify_auth()
+        mock_req.assert_called_once()
+        self.assertEqual(result["username"], "u_fresh")
+
+
+class TestLeaderboard(unittest.TestCase):
+    def test_leaderboard_sorted_by_weekly_xp(self):
+        from unittest.mock import MagicMock, patch
+        from duo.api import DuoClient
+
+        c = DuoClient(username="u", jwt_token="eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c")
+        user_data = {"username": "u", "id": 1, "name": "Me", "xpThisWeek": 50, "totalXp": 5000, "streak": 10}
+        friends = [
+            {"username": "a", "name": "Alpha", "points": 3000, "streak": 5, "xp_this_week": 200},
+            {"username": "b", "name": "Beta", "points": 1000, "streak": 1, "xp_this_week": 10},
+        ]
+        with patch.object(c, "verify_auth", return_value=user_data), \
+             patch.object(c, "get_friends", return_value=friends):
+            entries = c.get_leaderboard()
+
+        self.assertEqual(len(entries), 3)
+        # Alpha has most weekly XP (200), should be rank 1
+        self.assertEqual(entries[0]["username"], "a")
+        self.assertEqual(entries[0]["rank"], 1)
+        # Me has 50 weekly XP — rank 2
+        self.assertEqual(entries[1]["username"], "u")
+        self.assertTrue(entries[1]["is_self"])
+
+
+class TestStreakGradient(unittest.TestCase):
+    def test_status_renders_for_various_streaks(self):
+        from duo.ui import render_status
+        for streak in [0, 3, 15, 50, 120]:
+            # Should not raise for any streak length
+            render_status(
+                {"site_streak": streak, "streak_extended_today": True, "gems": 0, "total_xp": 0},
+                {"username": "tester"},
+            )
 
 
 class TestAutoPracticeTiming(unittest.TestCase):

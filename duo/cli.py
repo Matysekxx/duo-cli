@@ -40,6 +40,7 @@ from .ui import (
     render_friends_table,
     render_hearts,
     render_help,
+    render_leaderboard,
     render_profile,
     render_shop,
     render_status,
@@ -384,6 +385,18 @@ def friends_cmd() -> None:
         print_error(f"Failed to load friends: {e}")
 
 
+@cli.command("leaderboard")
+@_require_auth
+def leaderboard_cmd() -> None:
+    """Show XP leaderboard — you + friends ranked by weekly XP."""
+    try:
+        client = DuoClient()
+        entries = client.get_leaderboard()
+        render_leaderboard(entries)
+    except Exception as e:
+        print_error(f"Failed to load leaderboard: {e}")
+
+
 @cli.command("hearts")
 @_require_auth
 def hearts_cmd() -> None:
@@ -589,6 +602,7 @@ def shell_cmd() -> None:
         "hearts": hearts_cmd,
         "config": config_cmd,
         "export": export_cmd,
+        "leaderboard": leaderboard_cmd,
         "switch": switch_cmd,
         "profile": profile_cmd,
         "friends": friends_cmd,
