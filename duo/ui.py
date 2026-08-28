@@ -306,6 +306,40 @@ def render_friends_table(friends: List[Dict[str, Any]]) -> None:
     console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
+def render_hearts(hearts_data: Dict[str, Any]) -> None:
+    hearts = hearts_data.get("hearts")
+    is_unlimited = hearts_data.get("is_unlimited", False)
+    max_h = hearts_data.get("max_hearts", 5)
+    console.print()
+    console.print("[bold bright_cyan]❤️  HEARTS[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    if is_unlimited:
+        console.print("  [bold bright_green]Unlimited ♥[/]  [dim](Super Duolingo)[/dim]")
+    else:
+        try:
+            h_int = int(hearts) if isinstance(hearts, (int, str)) and str(hearts).isdigit() else (hearts if isinstance(hearts, int) else 0)
+        except Exception:
+            h_int = 0
+        bar = _hearts_bar(h_int)
+        console.print(f"  {bar}  [bold white]{h_int}/{max_h}[/]")
+        if h_int == 0:
+            console.print("  [bold bright_red]Out of hearts! Wait for refill or buy in shop.[/]")
+        elif h_int <= 2:
+            console.print("  [bold bright_yellow]Low hearts — be careful![/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print()
+
+
+def render_config(config_data: Dict[str, Any]) -> None:
+    console.print()
+    console.print("[bold bright_cyan]⚙️  CONFIG[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    for k, v in config_data.items():
+        console.print(f"  [dim]{k:<18}[/] [white]{v}[/]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print()
+
+
 # --- HELP MENU RENDERER ---
 
 def render_help() -> None:
@@ -332,7 +366,10 @@ def render_help() -> None:
         ("STORE & SESSION", "shop, streak freeze, and settings", [
             ("shop", "Browse shop items and gem balance"),
             ("freeze", "Buy & equip Streak Freeze  [dim](200 gems)[/dim]"),
+            ("hearts", "Show heart / health status"),
             ("switch <lang>", "Switch active course  [dim](e.g. duo switch es)[/dim]"),
+            ("config", "Show resolved config & token expiry"),
+            ("export", "Export progress to JSON/CSV  [dim](-f, -o)[/dim]"),
             ("login / logout", "Connect or disconnect Duolingo account"),
             ("shell", "Launch interactive REPL shell"),
         ]),

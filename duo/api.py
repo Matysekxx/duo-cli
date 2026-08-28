@@ -639,10 +639,24 @@ class DuoClient:
         """Get user hearts / health status."""
         user_data = self.verify_auth(force_refresh=force_refresh)
         has_plus = user_data.get("hasPlus", False)
-        hearts = user_data.get("hearts", 5 if has_plus else user_data.get("health", 5))
+        raw = user_data.get("hearts", 5 if has_plus else user_data.get("health", 5))
+        # New API may return hearts as dict {hearts: 5, ...}
+        if isinstance(raw, dict):
+            raw = raw.get("hearts") or raw.get("health") or raw.get("count") or 5
+        try:
+            hearts_val: Any = int(raw) if not has_plus else "Unlimited"
+        except Exception:
+            hearts_val = 5 if not has_plus else "Unlimited"
+        if has_plus:
+            hearts_val = "Unlimited"
+        else:
+            try:
+                hearts_val = max(0, min(5, int(hearts_val)))
+            except Exception:
+                hearts_val = 5
         return {
-            "hearts": hearts if not has_plus else "Unlimited",
-            "is_unlimited": has_plus,
+            "hearts": hearts_val,
+            "is_unlimited": bool(has_plus),
             "max_hearts": 5,
         }
 

@@ -14,8 +14,10 @@ from rich.prompt import Prompt
 
 from .api import DuoAPIError, DuoClient
 from .config import (
+    CONFIG_FILE,
     clear_config,
     get_jwt,
+    get_jwt_expiry,
     get_preset_language,
     get_username,
     is_authenticated,
@@ -33,8 +35,10 @@ from .ui import (
     print_success,
     print_warning,
     render_calendar,
+    render_config,
     render_courses_table,
     render_friends_table,
+    render_hearts,
     render_help,
     render_profile,
     render_shop,
@@ -355,6 +359,107 @@ def friends_cmd() -> None:
         print_error(f"Failed to load friends: {e}")
 
 
+@cli.command("hearts")
+@_require_auth
+def hearts_cmd() -> None:
+    """Show heart / health status."""
+    try:
+        client = DuoClient()
+        data = client.get_hearts()
+        render_hearts(data)
+    except Exception as e:
+        print_error(f"Failed to load hearts: {e}")
+
+
+@cli.command("config")
+def config_cmd() -> None:
+    """Show resolved config and token expiry."""
+    import datetime
+
+    jwt = get_jwt()
+    username = get_username()
+    preset = get_preset_language()
+    expiry = get_jwt_expiry()
+    expiry_str = "unknown"
+    if expiry:
+        try:
+            dt = datetime.datetime.fromtimestamp(expiry)
+            days_left = (dt - datetime.datetime.now()).days
+            expiry_str = f"{dt.strftime('%Y-%m-%d %H:%M')} ({days_left} days left)"
+            if days_left < 3:
+                expiry_str += " ⚠ expires soon!"
+        except Exception:
+            expiry_str = str(expiry)
+    jwt_masked = f"{jwt[:12]}...{jwt[-8:]}" if jwt and len(jwt) > 20 else ("set" if jwt else "not set")
+    # detect source
+    import os as _os
+
+    src = "config.json"
+    if _os.getenv("DUOLINGO_JWT") or _os.getenv("DUOLINGO_JWT_TOKEN"):
+        src = "env var"
+    elif (__import__("pathlib").Path.cwd() / ".env").exists():
+        # check if jwt came from .env (approx)
+        src = ".env / config.json"
+    data = {
+        "username": username or "not set",
+        "jwt": jwt_masked,
+        "jwt_source": src,
+        "jwt_expiry": expiry_str,
+        "preset_language": preset or "not set",
+        "config_file": str(CONFIG_FILE),
+        "authenticated": str(is_authenticated()),
+    }
+    render_config(data)
+
+
+@cli.command("export")
+@click.option("--format", "-f", "fmt", type=click.Choice(["json", "csv"]), default="json", help="Export format (json/csv)")
+@click.option("--output", "-o", default=None, help="Output file (default: duo-export.<fmt>)")
+@click.option("--days", "-d", default=30, type=int, help="Days of calendar history to include (1-365)")
+@_require_auth
+def export_cmd(fmt: str, output: Optional[str], days: int) -> None:
+    """Export progress (courses, calendar, profile) to file."""
+    import csv as _csv
+    import json as _json
+    from pathlib import Path as _Path
+
+    if not 1 <= days <= 365:
+        print_error("Invalid --days value — must be between 1 and 365")
+        return
+    try:
+        client = DuoClient()
+        user_data = client.get_full_user_data()
+        courses = client.get_courses()
+        calendar = client.get_streak_calendar(days)
+        streak_info = client.get_streak_info()
+        payload = {
+            "username": user_data.get("username"),
+            "totalXp": user_data.get("totalXp"),
+            "streak": user_data.get("streak"),
+            "courses": courses,
+            "calendar": calendar,
+            "streak_info": streak_info,
+            "exported_at": __import__("datetime").datetime.now().isoformat(),
+        }
+        out_path = _Path(output) if output else _Path(f"duo-export.{fmt}")
+        if fmt == "json":
+            out_path.write_text(_json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        else:
+            # CSV: flatten calendar
+            with open(out_path, "w", newline="", encoding="utf-8") as f:
+                w = _csv.writer(f)
+                w.writerow(["date", "day", "is_active", "xp"])
+                for d in calendar:
+                    w.writerow([d["date"], d["day_name"], d["is_active"], d["xp"]])
+                w.writerow([])
+                w.writerow(["course", "language", "xp", "is_current"])
+                for c in courses:
+                    w.writerow([c.get("title"), c.get("language"), c.get("xp"), c.get("is_current")])
+        print_success(f"Exported to [bold bright_white]{out_path.resolve()}[/] ({fmt})")
+    except Exception as e:
+        print_error(f"Export failed: {e}")
+
+
 @cli.command("practice")
 @click.option("--lang", "-l", default=None, help="Target language (e.g. es, de, en)")
 def practice_cmd(lang: Optional[str]) -> None:
@@ -448,6 +553,9 @@ def shell_cmd() -> None:
         "calendar": calendar_cmd,
         "shop": shop_cmd,
         "freeze": freeze_cmd,
+        "hearts": hearts_cmd,
+        "config": config_cmd,
+        "export": export_cmd,
         "switch": switch_cmd,
         "profile": profile_cmd,
         "friends": friends_cmd,
