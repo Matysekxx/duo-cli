@@ -403,6 +403,8 @@ class DuoClient:
             self.session.cookies.set("jwt_token", self.jwt_token, domain=".duolingo.com")
 
         self._cached_user_data: Optional[Dict[str, Any]] = None
+        self._cache_timestamp: Optional[float] = None
+        self._cache_ttl: float = 60.0  # seconds
 
     def is_authenticated(self) -> bool:
         """Check if client has JWT and username."""
@@ -411,6 +413,7 @@ class DuoClient:
     def invalidate_cache(self) -> None:
         """Clear cached user data."""
         self._cached_user_data = None
+        self._cache_timestamp = None
 
     def request(self, method: str, url: str, **kwargs) -> requests.Response:
         """Perform HTTP request with robust error handling and header-injection guard."""
@@ -447,7 +450,11 @@ class DuoClient:
             raise DuoAPIError("Missing authentication token. Run 'duo login' first.")
 
         if self._cached_user_data is not None and not force_refresh:
-            return self._cached_user_data
+            # TTL check — serve from cache if still fresh
+            import time as _t
+            if self._cache_timestamp and (_t.time() - self._cache_timestamp) < self._cache_ttl:
+                return self._cached_user_data
+            # Cache is stale — fall through to refresh below
 
         url = f"https://www.duolingo.com/2017-06-30/users?username={url_quote(self.username, safe='')}"
         resp = self.request("GET", url)
@@ -460,7 +467,9 @@ class DuoClient:
         users = data.get("users", [])
         if not users:
             raise DuoAPIError(f"User '{self.username}' was not found.")
+        import time as _t
         self._cached_user_data = users[0]
+        self._cache_timestamp = _t.time()
         return users[0]
 
     def get_learning_language(self) -> Optional[str]:
@@ -717,6 +726,38 @@ class DuoClient:
             results.sort(key=lambda x: -x["points"])
             return results
         return []
+
+    def get_leaderboard(self) -> List[Dict[str, Any]]:
+        """Return a ranked leaderboard: self + friends, sorted by weekly XP (falls back to total XP)."""
+        user_data = self.verify_auth()
+        friends = self.get_friends()
+
+        self_entry = {
+            "rank": 0,
+            "username": user_data.get("username", self.username or ""),
+            "name": user_data.get("name") or user_data.get("username", ""),
+            "xp_this_week": user_data.get("xpThisWeek", 0),
+            "total_xp": user_data.get("totalXp", 0),
+            "streak": user_data.get("streak", 0),
+            "is_self": True,
+        }
+
+        entries = [self_entry]
+        for f in friends:
+            entries.append({
+                "rank": 0,
+                "username": f.get("username", ""),
+                "name": f.get("name") or f.get("username", ""),
+                "xp_this_week": f.get("xp_this_week", 0),
+                "total_xp": f.get("points", 0),
+                "streak": f.get("streak", 0),
+                "is_self": False,
+            })
+
+        entries.sort(key=lambda e: (-e["xp_this_week"], -e["total_xp"]))
+        for i, e in enumerate(entries, 1):
+            e["rank"] = i
+        return entries
 
     def switch_language(self, lang_code: str) -> bool:
         """Switch active learning language."""
