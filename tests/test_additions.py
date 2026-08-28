@@ -417,5 +417,22 @@ class TestShellShlex(unittest.TestCase):
             shlex.split('profile "unclosed', posix=True)
 
 
+class TestModuleExecution(unittest.TestCase):
+    def test_main_module_importable(self):
+        import importlib
+        mod = importlib.import_module("duo.__main__")
+        self.assertTrue(hasattr(mod, "main"))
+
+    def test_practice_session_no_es_default(self):
+        from duo.practice import PracticeSession
+        from unittest.mock import MagicMock
+        c = MagicMock()
+        c.get_learning_language.return_value = None
+        c.get_courses.return_value = []
+        with mock.patch("duo.practice.get_preset_language", return_value=None):
+            s = PracticeSession(c)
+            self.assertIsNone(s.lang_code)
+
+
 if __name__ == "__main__":
     unittest.main()

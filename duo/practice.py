@@ -111,15 +111,20 @@ class PracticeSession:
 
     def __init__(self, client: DuoClient, lang_code: Optional[str] = None, dry_run: bool = False):
         self.client = client
-        # Resolution order: explicit -l flag > local preset > server active
-        # course > "es". The local preset lets `duo switch` stick even when the
-        # server doesn't reflect the change.
-        self.lang_code = (
+        # Resolution order: explicit -l flag > local preset > server active course > first enrolled course
+        resolved = (
             lang_code
             or get_preset_language()
             or client.get_learning_language()
-            or "es"
-        ).lower()
+        )
+        if not resolved:
+            try:
+                courses = client.get_courses()
+                if courses:
+                    resolved = courses[0].get("language")
+            except Exception:
+                pass
+        self.lang_code = resolved.lower() if resolved else None
         self.score = 0
         self.hearts = 5
         self.combo = 0
@@ -128,6 +133,12 @@ class PracticeSession:
         self.dry_run = bool(dry_run)
 
     def run(self) -> None:
+        if not self.lang_code:
+            print_error(
+                "No target language set. Please specify a language code with '-l <code>' "
+                "(e.g. duo practice -l en) or set it with 'duo switch <lang>'."
+            )
+            return
         console.clear()
         session_start_time = time.time()
 
@@ -393,8 +404,21 @@ class AutoPractice:
                 self.lang_code = (
                     get_preset_language()
                     or user_info.get("learningLanguage")
-                    or "es"
-                ).lower()
+                )
+                if not self.lang_code:
+                    try:
+                        courses = self.client.get_courses()
+                        if courses:
+                            self.lang_code = courses[0].get("language")
+                    except Exception:
+                        pass
+                if not self.lang_code:
+                    print_error(
+                        "No learning language found on your account. "
+                        "Please specify one with '-l <code>' (e.g. duo auto -l en) or set it with 'duo switch <lang>'."
+                    )
+                    return
+                self.lang_code = self.lang_code.lower()
         except Exception as e:
             print_error(f"Failed to connect to Duolingo: {e}")
             return

@@ -151,12 +151,17 @@ def render_status(data: Dict[str, Any], user_data: Optional[Dict[str, Any]] = No
     if curr_course:
         code = curr_course.get('learningLanguage', '').upper()
         title = curr_course.get('title', 'Unknown')
-        course_display = f"{title} [{code}]"
-    elif user_data:
-        code = user_data.get("learningLanguage", "es").upper()
+        course_display = f"{title} [{code}]" if code else title
+    elif user_data and user_data.get("learningLanguage"):
+        code = user_data.get("learningLanguage", "").upper()
         course_display = f"Course [{code}]"
     else:
-        course_display = "Spanish [ES]"
+        from .config import get_preset_language
+        preset = get_preset_language()
+        if preset:
+            course_display = f"Course [{preset.upper()}]"
+        else:
+            course_display = "No active course [—]"
 
     streak_badge = "[bold white on dark_green]  ✓ COMPLETED TODAY  [/]" if streak_extended else "[bold white on dark_red]  ⌛ INCOMPLETE  [/]"
     accent = "bright_green" if streak_extended else "bright_red"

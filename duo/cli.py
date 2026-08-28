@@ -210,8 +210,41 @@ def login_cmd(username: str, jwt: str) -> None:
     try:
         set_credentials(username, jwt)
         client = DuoClient()
-        user_info = client.verify_auth()
+        user_info = client.verify_auth(force_refresh=True)
         print_success(f"Successfully logged in as [bold bright_white]@{user_info.get('username')}[/]! 🔥 Streak: {user_info.get('streak', 0)} Days.")
+
+        # Detect enrolled courses and learning language
+        active_lang = (user_info.get("learningLanguage") or "").lower()
+        courses = []
+        try:
+            courses = client.get_courses(force_refresh=True)
+        except Exception:
+            pass
+
+        if courses:
+            console.print("\n[bold bright_cyan]📚 Enrolled Courses:[/]")
+            for i, c in enumerate(courses, 1):
+                cur_marker = " [bold bright_green](Active)[/]" if c.get("is_current") else ""
+                console.print(f"  [bold bright_yellow]{i}.[/] {c.get('title', 'Unknown')} [{c.get('language', '').upper()}]{cur_marker}")
+
+            if active_lang:
+                set_preset_language(active_lang)
+                print_info(f"Default practice course set to: [bold bright_cyan]{active_lang.upper()}[/] (use 'duo switch <lang>' to change)")
+            else:
+                choice = Prompt.ask("\n[bold bright_cyan]Select default course number (or press Enter for course 1)[/]", default="1").strip()
+                if choice.isdigit() and 1 <= int(choice) <= len(courses):
+                    chosen = courses[int(choice) - 1]["language"].lower()
+                    set_preset_language(chosen)
+                    print_success(f"Default course set to: [bold bright_cyan]{chosen.upper()}[/]")
+        elif active_lang:
+            set_preset_language(active_lang)
+            print_info(f"Default practice course set to: [bold bright_cyan]{active_lang.upper()}[/]")
+        else:
+            print_warning("No active enrolled courses detected on this account.")
+            manual = Prompt.ask("[bold bright_cyan]Enter target language code to learn (e.g. en, es, de, fr, or press Enter to skip)[/]", default="").strip().lower()
+            if manual and _is_valid_lang(manual):
+                set_preset_language(manual)
+                print_success(f"Default course set to: [bold bright_cyan]{manual.upper()}[/]")
     except Exception as e:
         # Never leak the raw token in error output
         msg = str(e)
@@ -503,7 +536,7 @@ def export_cmd(fmt: str, output: Optional[str], days: int) -> None:
 
 
 @cli.command("practice")
-@click.option("--lang", "-l", default=None, help="Target language (e.g. es, de, en)")
+@click.option("--lang", "-l", default=None, help="Target language (e.g. en, es, de, fr)")
 @click.option("--dry-run", is_flag=True, help="Simulate lesson without submitting XP to server")
 def practice_cmd(lang: Optional[str], dry_run: bool) -> None:
     """Start an interactive practice session to earn XP and maintain streak."""
@@ -511,11 +544,37 @@ def practice_cmd(lang: Optional[str], dry_run: bool) -> None:
         print_error(f"Invalid language code: {lang!r}")
         return
     client = DuoClient()
+
+    target_lang = lang or get_preset_language()
+    if not target_lang and client.is_authenticated():
+        target_lang = client.get_learning_language()
+        if not target_lang:
+            try:
+                courses = client.get_courses()
+                if courses:
+                    console.print("\n[bold bright_cyan]Select course for practice:[/]")
+                    for i, c in enumerate(courses, 1):
+                        console.print(f"  [bold bright_yellow]{i}.[/] {c.get('title', 'Unknown')} [{c.get('language', '').upper()}]")
+                    ans = Prompt.ask("[bold bright_cyan]Choice (or enter language code)[/]", default="1").strip().lower()
+                    if ans.isdigit() and 1 <= int(ans) <= len(courses):
+                        target_lang = courses[int(ans) - 1]["language"]
+                    elif _is_valid_lang(ans):
+                        target_lang = ans
+            except Exception:
+                pass
+
+    if not target_lang:
+        target_lang = Prompt.ask("[bold bright_cyan]Enter target language code (e.g. en, es, de, fr)[/]").strip().lower()
+        if not _is_valid_lang(target_lang):
+            print_error("Invalid language code. Practice aborted.")
+            return
+        set_preset_language(target_lang)
+
     if dry_run:
         print_warning("Dry run — XP will NOT be submitted.")
     if not client.is_authenticated():
         print_warning("Running in offline mode. Run 'duo login' to sync XP with Duolingo servers.")
-    session = PracticeSession(client, lang, dry_run=dry_run)
+    session = PracticeSession(client, target_lang, dry_run=dry_run)
     session.run()
 
 
@@ -524,7 +583,7 @@ def practice_cmd(lang: Optional[str], dry_run: bool) -> None:
 @click.option("--target-xp", "-x", default=None, type=int, help="Target XP to earn before stopping")
 @click.option("--until-goal", "-g", is_flag=True, help="Run practice sessions until today's daily XP goal is reached")
 @click.option("--loop", "-L", is_flag=True, help="Run practice sessions forever (until Ctrl+C)")
-@click.option("--lang", "-l", default=None, help="Target language code (e.g. es, de, fr)")
+@click.option("--lang", "-l", default=None, help="Target language code (e.g. en, es, de, fr)")
 @click.option("--max-sessions", "-m", default=None, type=int, help="Hard cap on number of sessions (recommended with -L to avoid bans)")
 @click.option("--dry-run", is_flag=True, help="Simulate sessions without submitting XP")
 def auto_cmd(
@@ -565,9 +624,27 @@ def auto_cmd(
     if dry_run:
         print_warning("Dry run — XP will NOT be submitted.")
     client = DuoClient()
+
+    target_lang = lang or get_preset_language()
+    if not target_lang:
+        target_lang = client.get_learning_language()
+    if not target_lang:
+        try:
+            courses = client.get_courses()
+            if courses:
+                target_lang = courses[0]["language"]
+        except Exception:
+            pass
+    if not target_lang:
+        target_lang = Prompt.ask("[bold bright_cyan]Enter target language code for auto practice (e.g. en, es, de, fr)[/]").strip().lower()
+        if not _is_valid_lang(target_lang):
+            print_error("Invalid language code. Aborted.")
+            return
+        set_preset_language(target_lang)
+
     bot = AutoPractice(
         client=client,
-        lang_code=lang,
+        lang_code=target_lang,
         max_sessions=max_sessions,
         dry_run=dry_run,
     )
@@ -588,7 +665,7 @@ def shell_cmd() -> None:
     # Initial display data — will be refreshed each loop iteration
     _initial_client = DuoClient()
     _initial_user = _initial_client.username or get_username() or "guest"
-    _initial_preset = get_preset_language() or "es"
+    _initial_preset = get_preset_language() or _initial_client.get_learning_language() or "none"
 
     console.print()
     console.print("[bold bright_green]🦉 DUO INTERACTIVE SHELL[/]")
@@ -620,7 +697,7 @@ def shell_cmd() -> None:
         try:
             # Refresh username/preset each iteration so switch/login reflect immediately
             cur_user = get_username() or "guest"
-            cur_preset = get_preset_language() or "es"
+            cur_preset = get_preset_language() or _initial_client.get_learning_language() or "none"
             prompt_str = f"[bold bright_green]🦉 duo:{cur_user}/{cur_preset}[/] > "
             raw = Prompt.ask(prompt_str).strip()
             if not raw:
