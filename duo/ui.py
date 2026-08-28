@@ -211,23 +211,6 @@ def render_calendar(calendar_data: List[Dict[str, Any]], days: int = 14) -> None
         table.add_row(date_str, day_name, status, xp)
 
     console.print(table)
-    # Heatmap line: ▇ blocks colored by XP intensity
-    try:
-        blocks = []
-        for d in calendar_data:
-            xp = d.get("xp", 0)
-            if xp == 0:
-                blocks.append("[dim]░[/]")
-            elif xp <= 10:
-                blocks.append("[bright_yellow]▇[/]")
-            elif xp <= 30:
-                blocks.append("[bright_green]▇[/]")
-            else:
-                blocks.append("[bold bright_green]▇[/]")
-        console.print("  " + " ".join(blocks) + "  [dim]heatmap[/dim]")
-        console.print("  [dim]░ 0  ▇ 1-10  ▇ 11-30  ▇ 30+ XP[/dim]")
-    except Exception:
-        pass
     console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
