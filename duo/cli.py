@@ -76,6 +76,7 @@ def _parse_shell_auto_args(args: list[str]) -> dict:
     params: dict = {
         "until_goal": "-g" in args or "--until-goal" in args,
         "loop": "-L" in args or "--loop" in args,
+        "dry_run": "--dry-run" in args,
         "sessions": 1,
         "target_xp": None,
         "lang": None,
@@ -124,9 +125,15 @@ class DuoGroup(click.Group):
 
 @click.group(cls=DuoGroup, invoke_without_command=True)
 @click.option("-v", "--version", is_flag=True, help="Show application version.")
+@click.option("--verbose", is_flag=True, help="Enable verbose debug logging.")
 @click.pass_context
-def cli(ctx: click.Context, version: bool) -> None:
+def cli(ctx: click.Context, version: bool, verbose: bool) -> None:
     """🦉 Duo-CLI: Modern Duolingo Terminal Client & Automated Learning Engine."""
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
+        os.environ["DUO_DEBUG"] = "1"
     if version:
         console.print(f"[bold bright_green]duo-cli[/] version [bold bright_yellow]{UI_VERSION}[/]")
         ctx.exit()
@@ -462,15 +469,18 @@ def export_cmd(fmt: str, output: Optional[str], days: int) -> None:
 
 @cli.command("practice")
 @click.option("--lang", "-l", default=None, help="Target language (e.g. es, de, en)")
-def practice_cmd(lang: Optional[str]) -> None:
+@click.option("--dry-run", is_flag=True, help="Simulate lesson without submitting XP to server")
+def practice_cmd(lang: Optional[str], dry_run: bool) -> None:
     """Start an interactive practice session to earn XP and maintain streak."""
     if lang and not _is_valid_lang(lang):
         print_error(f"Invalid language code: {lang!r}")
         return
     client = DuoClient()
+    if dry_run:
+        print_warning("Dry run — XP will NOT be submitted.")
     if not client.is_authenticated():
         print_warning("Running in offline mode. Run 'duo login' to sync XP with Duolingo servers.")
-    session = PracticeSession(client, lang)
+    session = PracticeSession(client, lang, dry_run=dry_run)
     session.run()
 
 
@@ -481,6 +491,7 @@ def practice_cmd(lang: Optional[str]) -> None:
 @click.option("--loop", "-L", is_flag=True, help="Run practice sessions forever (until Ctrl+C)")
 @click.option("--lang", "-l", default=None, help="Target language code (e.g. es, de, fr)")
 @click.option("--max-sessions", "-m", default=None, type=int, help="Hard cap on number of sessions (recommended with -L to avoid bans)")
+@click.option("--dry-run", is_flag=True, help="Simulate sessions without submitting XP")
 def auto_cmd(
     sessions: int,
     target_xp: Optional[int],
@@ -488,6 +499,7 @@ def auto_cmd(
     loop: bool,
     lang: Optional[str],
     max_sessions: Optional[int],
+    dry_run: bool,
 ) -> None:
     """Automate Duolingo practice sessions with natural delays to earn XP and keep streak."""
     if not is_authenticated():
@@ -515,11 +527,14 @@ def auto_cmd(
             "[bold yellow]⚠ Endless auto (-L) can look like botting to Duolingo and risks a ban. "
             "Use -m/--max-sessions to set a limit.[/]"
         )
+    if dry_run:
+        print_warning("Dry run — XP will NOT be submitted.")
     client = DuoClient()
     bot = AutoPractice(
         client=client,
         lang_code=lang,
         max_sessions=max_sessions,
+        dry_run=dry_run,
     )
     bot.run(sessions=sessions, target_xp=target_xp, until_goal=until_goal, loop=loop)
 
@@ -607,8 +622,14 @@ def shell_cmd() -> None:
             elif cmd_name in cmd_map:
                 try:
                     ctx = click.Context(cmd_map[cmd_name])
-                    if cmd_name == "practice" and args:
-                        ctx.invoke(cmd_map[cmd_name], lang=args[0])
+                    if cmd_name == "practice":
+                        # practice [lang] [--dry-run]
+                        p_lang = None
+                        p_dry = "--dry-run" in args
+                        filtered = [a for a in args if a != "--dry-run"]
+                        if filtered:
+                            p_lang = filtered[0]
+                        ctx.invoke(cmd_map[cmd_name], lang=p_lang, dry_run=p_dry)
                     elif cmd_name == "profile" and args:
                         ctx.invoke(cmd_map[cmd_name], username=args[0])
                     elif cmd_name == "auto":
@@ -621,6 +642,7 @@ def shell_cmd() -> None:
                             loop=p["loop"],
                             lang=p["lang"],
                             max_sessions=p["max_sessions"],
+                            dry_run=p["dry_run"],
                         )
                     elif cmd_name == "switch" and args:
                         ctx.invoke(cmd_map[cmd_name], language_code=args[0])

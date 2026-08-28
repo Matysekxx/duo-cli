@@ -108,7 +108,7 @@ def normalize_answer(text: str) -> str:
 class PracticeSession:
     """Interactive practice engine for manual terminal learning."""
 
-    def __init__(self, client: DuoClient, lang_code: Optional[str] = None):
+    def __init__(self, client: DuoClient, lang_code: Optional[str] = None, dry_run: bool = False):
         self.client = client
         # Resolution order: explicit -l flag > local preset > server active
         # course > "es". The local preset lets `duo switch` stick even when the
@@ -124,6 +124,7 @@ class PracticeSession:
         self.combo = 0
         self.max_combo = 0
         self.server_session = None
+        self.dry_run = bool(dry_run)
 
     def run(self) -> None:
         console.clear()
@@ -298,7 +299,9 @@ class PracticeSession:
 
         # Submit results to Duolingo backend if possible
         sync_status = ""
-        if self.client.is_authenticated() and self.score > 0:
+        if self.dry_run:
+            sync_status = "[bold bright_yellow]⚡ Dry run — not submitted to server.[/]"
+        elif self.client.is_authenticated() and self.score > 0:
             console.print("\n[bold cyan]⏳ Submitting session to Duolingo servers...[/]")
             session_to_submit = self.server_session or {"id": "dummy", "learningLanguage": self.lang_code}
             sync_res = self.client.submit_practice_session(
@@ -343,10 +346,12 @@ class AutoPractice:
         client: DuoClient,
         lang_code: Optional[str] = None,
         max_sessions: Optional[int] = None,
+        dry_run: bool = False,
     ):
         self.client = client
         self.lang_code = lang_code
         self.max_sessions = max_sessions
+        self.dry_run = bool(dry_run)
         self.hearts = 5
         self.delay_min = self.QUESTION_DELAY_MIN
         self.delay_max = self.QUESTION_DELAY_MAX
@@ -487,20 +492,10 @@ class AutoPractice:
                     time.sleep(pause)
                     score += 1
 
-                # Submit session to Duolingo backend
-                console.print(f"  [dim]Submitting session {session_num} to Duolingo servers...[/]")
-                sync_res = self.client.submit_practice_session(
-                    server_sess,
-                    score=score,
-                    start_time=session_start_time,
-                    hearts_left=self.hearts,
-                    mistakes=max(0, len(raw_challenges) - score),
-                    failed=self.hearts <= 0,
-                )
-
-                if sync_res.get("serverSync"):
-                    xp_gain = sync_res.get("xpGain", 15)
-                    streak_extended = sync_res.get("streakExtended", True)
+                # Submit session to Duolingo backend (or dry-run)
+                if self.dry_run:
+                    console.print(f"  [dim]⚡ Dry run — session {session_num} not submitted.[/]")
+                    xp_gain = 15
                     total_xp_earned += xp_gain
                     sessions_completed += 1
                     render_auto_session_result(
@@ -510,7 +505,29 @@ class AutoPractice:
                         total_xp_earned=total_xp_earned,
                     )
                 else:
-                    print_warning(f"Session submission status: {sync_res}")
+                    console.print(f"  [dim]Submitting session {session_num} to Duolingo servers...[/]")
+                    sync_res = self.client.submit_practice_session(
+                        server_sess,
+                        score=score,
+                        start_time=session_start_time,
+                        hearts_left=self.hearts,
+                        mistakes=max(0, len(raw_challenges) - score),
+                        failed=self.hearts <= 0,
+                    )
+
+                    if sync_res.get("serverSync"):
+                        xp_gain = sync_res.get("xpGain", 15)
+                        streak_extended = sync_res.get("streakExtended", True)
+                        total_xp_earned += xp_gain
+                        sessions_completed += 1
+                        render_auto_session_result(
+                            session_idx=session_num,
+                            xp_gained=xp_gain,
+                            streak_extended=streak_extended,
+                            total_xp_earned=total_xp_earned,
+                        )
+                    else:
+                        print_warning(f"Session submission status: {sync_res}")
 
                 # Pause between sessions if continuing
                 should_continue = True
