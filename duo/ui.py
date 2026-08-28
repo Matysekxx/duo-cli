@@ -371,7 +371,7 @@ def render_help() -> None:
 
     sections = [
         ("AUTOMATION", "auto-solve & interactive practice", [
-            ("auto", "Automate practice lessons  [dim](-s, -g, -x, -L, -m)[/dim]  ·  0.5-1s / q, 10-25s between"),
+            ("auto", "Automate practice lessons  [dim](-s, -g, -x, -L, -m)[/dim]  ·  fast pauses between lessons"),
             ("practice", "Interactive lesson in the terminal  [dim](-l)[/dim]"),
         ]),
         ("STATS & PROGRESS", "streak, courses, and dashboard", [

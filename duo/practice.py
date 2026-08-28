@@ -28,11 +28,11 @@ VISUAL_CHALLENGE_TYPES = {
     "svgPuzzle",
 }
 
-# Auto mode timing — base range (tuned for ~2x faster execution)
-AUTO_QUESTION_DELAY_MIN = 0.5
-AUTO_QUESTION_DELAY_MAX = 1.0
-AUTO_REST_MIN = 10.0
-AUTO_REST_MAX = 25.0
+# Auto mode timing — base range (tuned for fast execution)
+AUTO_QUESTION_DELAY_MIN = 0.4
+AUTO_QUESTION_DELAY_MAX = 0.8
+AUTO_REST_MIN = 3.0
+AUTO_REST_MAX = 8.0
 
 # Per-type multipliers: tasks requiring reading/writing take longer,
 # single-choice tasks are faster. Tuned so average with base 0.5-1.0s lands
@@ -572,17 +572,17 @@ class AutoPractice:
                         should_continue = False
 
                 if should_continue:
-                    # Pause between lessons: 10-25s base + jitter.
-                    # Every 5 sessions add a longer break (20-40s) to reduce detection risk.
+                    # Pause between lessons: 3-8s base + jitter.
+                    # Every 5 sessions add a slightly longer break (8-15s).
                     base_rest = random.uniform(self.rest_min, self.rest_max)
                     if sessions_completed > 0 and sessions_completed % 5 == 0:
-                        base_rest = random.uniform(20, 40)
-                        console.print(f"[dim]☕ Longer break after {sessions_completed} sessions — resting for {base_rest:.0f}s...[/]\n")
+                        base_rest = random.uniform(8.0, 15.0)
+                        console.print(f"[dim]☕ Short break after {sessions_completed} sessions — resting for {base_rest:.0f}s...[/]\n")
                     else:
                         console.print(f"[dim]⏳ Resting for {base_rest:.0f}s before next session...[/]\n")
                     # add small jitter
-                    base_rest += random.gauss(0, 0.8)
-                    base_rest = max(6.0, base_rest)
+                    base_rest += random.gauss(0, 0.4)
+                    base_rest = max(2.0, base_rest)
                     time.sleep(base_rest)
 
         except KeyboardInterrupt:
