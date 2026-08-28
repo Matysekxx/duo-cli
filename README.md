@@ -68,7 +68,7 @@
 git clone https://github.com/Matysekxx/duo-cli.git
 cd duo-cli
 
-# 2. Install in editable mode (registers the global `duo` command)
+# 2. Install package (registers the global `duo` command)
 pip install -e .
 ```
 
@@ -80,7 +80,11 @@ duo --version     # version
 duo               # dashboard (same as duo status)
 ```
 
-> **Windows tip:** The project includes `duo.bat` / `duo.ps1` wrappers. If `pip install -e .` doesn't work, run `python main.py <command>`.
+> **Ways to run `duo`:**
+> - `duo <command>` (when installed via pip in PATH)
+> - `python -m duo <command>` (universal module execution)
+> - `.\duo.bat` or `.\duo.ps1` (Windows command wrapper)
+> - `python main.py <command>` (direct script execution)
 
 ---
 
