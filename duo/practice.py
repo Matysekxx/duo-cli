@@ -28,15 +28,15 @@ VISUAL_CHALLENGE_TYPES = {
     "svgPuzzle",
 }
 
-# Auto mode timing — base range
-AUTO_QUESTION_DELAY_MIN = 1.0
-AUTO_QUESTION_DELAY_MAX = 2.0
-AUTO_REST_MIN = 20.0
-AUTO_REST_MAX = 50.0
+# Auto mode timing — base range (tuned for ~2x faster execution)
+AUTO_QUESTION_DELAY_MIN = 0.5
+AUTO_QUESTION_DELAY_MAX = 1.0
+AUTO_REST_MIN = 10.0
+AUTO_REST_MAX = 25.0
 
 # Per-type multipliers: tasks requiring reading/writing take longer,
-# single-choice tasks are faster. Tuned so average with base 1-2s lands
-# around 2.5-4.5s with prompt-length bonus.
+# single-choice tasks are faster. Tuned so average with base 0.5-1.0s lands
+# around 1.2-2.2s with prompt-length bonus.
 _TYPE_DELAY_MULTIPLIER = {
     "translate": 1.7,
     "completeReverseTranslation": 1.6,
@@ -71,7 +71,7 @@ def _human_delay(
 
     - Starts from uniform(base_min, base_max).
     - Applies per-type multiplier (harder types = longer).
-    - Adds prompt-length bonus (~0.015s per char, capped at 2.5s) to simulate
+    - Adds prompt-length bonus (~0.008s per char, capped at 1.25s) to simulate
       reading time.
     - Adds small Gaussian jitter for natural variance.
     """
@@ -79,9 +79,9 @@ def _human_delay(
     mult = _TYPE_DELAY_MULTIPLIER.get(ctype, 1.0)
     pause = base * mult
     if prompt:
-        pause += min(len(prompt) * 0.015, 2.5)
-    pause += random.gauss(0, 0.18)
-    return max(0.8, min(pause, 8.0))
+        pause += min(len(prompt) * 0.008, 1.25)
+    pause += random.gauss(0, 0.09)
+    return max(0.4, min(pause, 4.0))
 from .ui import (
     DIVIDER_LINE,
     console,
@@ -202,7 +202,7 @@ class PracticeSession:
             if q_type in VISUAL_CHALLENGE_TYPES:
                 console.print(f"\n[dim yellow]🖼️ Visual exercise ('{q_type}') can't be shown in terminal. Auto-completed! ✔[/dim yellow]")
                 self.score += 1
-                time.sleep(0.3)
+                time.sleep(0.15)
                 continue
 
             prompt_text = q.get("prompt", "")
@@ -222,7 +222,7 @@ class PracticeSession:
                     f"can't be shown in terminal. Skipped![/dim yellow]"
                 )
                 self.score += 1
-                time.sleep(0.3)
+                time.sleep(0.15)
                 continue
 
             if word_bank:
@@ -314,7 +314,7 @@ class PracticeSession:
                     console.print(f"\n[bold bright_red]✖ Some pairs were incorrect! Lost a heart (Remaining: {self.hearts}/5)[/]")
                 else:
                     render_answer_result(False, display_ans)
-            time.sleep(0.4)
+            time.sleep(0.2)
 
         # Submit results to Duolingo backend if possible
         sync_status = ""
@@ -509,7 +509,7 @@ class AutoPractice:
 
                     # Fast path for audio/visual challenges — still count but with minimal pause.
                     if ctype in AUDIO_CHALLENGE_TYPES or ctype in VISUAL_CHALLENGE_TYPES:
-                        pause = random.uniform(0.6, 1.2)
+                        pause = random.uniform(0.3, 0.6)
                     else:
                         pause = _human_delay(self.delay_min, self.delay_max, prompt, ctype)
                     render_auto_challenge(
@@ -572,17 +572,17 @@ class AutoPractice:
                         should_continue = False
 
                 if should_continue:
-                    # Pause between lessons: 20-50s base + jitter.
-                    # Every 5 sessions add a longer break (40-80s) to reduce detection risk.
+                    # Pause between lessons: 10-25s base + jitter.
+                    # Every 5 sessions add a longer break (20-40s) to reduce detection risk.
                     base_rest = random.uniform(self.rest_min, self.rest_max)
                     if sessions_completed > 0 and sessions_completed % 5 == 0:
-                        base_rest = random.uniform(40, 80)
+                        base_rest = random.uniform(20, 40)
                         console.print(f"[dim]☕ Longer break after {sessions_completed} sessions — resting for {base_rest:.0f}s...[/]\n")
                     else:
                         console.print(f"[dim]⏳ Resting for {base_rest:.0f}s before next session...[/]\n")
                     # add small jitter
-                    base_rest += random.gauss(0, 1.5)
-                    base_rest = max(12, base_rest)
+                    base_rest += random.gauss(0, 0.8)
+                    base_rest = max(6.0, base_rest)
                     time.sleep(base_rest)
 
         except KeyboardInterrupt:
