@@ -33,9 +33,6 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Session transcripts (may contain sensitive tokens)
-session-ses_*.md
-
 # Test / coverage cache
 .pytest_cache/
 htmlcov/
