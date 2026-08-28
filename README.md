@@ -134,7 +134,7 @@ All commands also work inside the interactive shell (`duo shell`).
 |---|---|---|
 | **`duo`** / **`duo status`** | Dashboard — streak, XP, course, gems | — |
 | **`duo practice`** | Interactive terminal lesson | `-l, --lang <code>` |
-| **`duo auto`** | Auto-solve lessons (0.4-0.8s / question, 3-8s between) | `-s, -g, -x, -L, -m, -l` |
+| **`duo auto`** | Auto-solve lessons (0.8-1.6s / question, 25-35s between) | `-s, -g, -x, -L, -m, -l` |
 | **`duo calendar`** | 14-day activity heatmap + XP history | `-d, --days <N>` |
 | **`duo courses`** | List all enrolled courses | — |
 | **`duo switch <lang>`** | Switch active course & save as preset | `es`, `de`, `fr`, `ja`... |
@@ -203,7 +203,7 @@ duo practice -l ja        # Japanese
 Creates **real lessons on the server** and solves them with randomized human-like delays. Perfect for keeping your streak when you don't have time.
 
 ```bash
-# Basic — 1 session (0.4-0.8s per question, 3-8s between lessons)
+# Basic — 1 session (0.8-1.6s per question, 25-35s between lessons)
 duo auto
 
 # 3 sessions
@@ -241,8 +241,8 @@ duo auto -L -m 20          # max 20 sessions
 
 #### How It Works
 
-- **Per question:** fixed `0.4–0.8s` random delay — fast & responsive
-- **Between lessons:** fixed `3–8s` random pause
+- **Per question:** realistic `0.8–1.6s` random delay
+- **Between lessons:** fixed `25–35s` random pause (simulates ad/navigation pause)
 - **No retries:** on server error it stops cleanly with an error message instead of retrying
 - **`maxInLessonStreak` capped at 9** so it never looks like a bot
 

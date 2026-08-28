@@ -28,15 +28,14 @@ VISUAL_CHALLENGE_TYPES = {
     "svgPuzzle",
 }
 
-# Auto mode timing — base range (tuned for fast execution)
-AUTO_QUESTION_DELAY_MIN = 0.4
-AUTO_QUESTION_DELAY_MAX = 0.8
-AUTO_REST_MIN = 3.0
-AUTO_REST_MAX = 8.0
+# Auto mode timing — realistic safe range (25-35s between lessons, balanced question pauses)
+AUTO_QUESTION_DELAY_MIN = 0.8
+AUTO_QUESTION_DELAY_MAX = 1.6
+AUTO_REST_MIN = 25.0
+AUTO_REST_MAX = 35.0
 
 # Per-type multipliers: tasks requiring reading/writing take longer,
-# single-choice tasks are faster. Tuned so average with base 0.5-1.0s lands
-# around 1.2-2.2s with prompt-length bonus.
+# single-choice tasks are faster.
 _TYPE_DELAY_MULTIPLIER = {
     "translate": 1.7,
     "completeReverseTranslation": 1.6,
@@ -71,7 +70,7 @@ def _human_delay(
 
     - Starts from uniform(base_min, base_max).
     - Applies per-type multiplier (harder types = longer).
-    - Adds prompt-length bonus (~0.008s per char, capped at 1.25s) to simulate
+    - Adds prompt-length bonus (~0.012s per char, capped at 1.8s) to simulate
       reading time.
     - Adds small Gaussian jitter for natural variance.
     """
@@ -79,9 +78,9 @@ def _human_delay(
     mult = _TYPE_DELAY_MULTIPLIER.get(ctype, 1.0)
     pause = base * mult
     if prompt:
-        pause += min(len(prompt) * 0.008, 1.25)
-    pause += random.gauss(0, 0.09)
-    return max(0.4, min(pause, 4.0))
+        pause += min(len(prompt) * 0.012, 1.8)
+    pause += random.gauss(0, 0.12)
+    return max(0.6, min(pause, 6.0))
 from .ui import (
     DIVIDER_LINE,
     console,
@@ -509,7 +508,7 @@ class AutoPractice:
 
                     # Fast path for audio/visual challenges — still count but with minimal pause.
                     if ctype in AUDIO_CHALLENGE_TYPES or ctype in VISUAL_CHALLENGE_TYPES:
-                        pause = random.uniform(0.3, 0.6)
+                        pause = random.uniform(0.5, 0.9)
                     else:
                         pause = _human_delay(self.delay_min, self.delay_max, prompt, ctype)
                     render_auto_challenge(
@@ -572,17 +571,11 @@ class AutoPractice:
                         should_continue = False
 
                 if should_continue:
-                    # Pause between lessons: 3-8s base + jitter.
-                    # Every 5 sessions add a slightly longer break (8-15s).
+                    # Pause between lessons: 25-35s base + jitter (simulates realistic ad/navigation time).
                     base_rest = random.uniform(self.rest_min, self.rest_max)
-                    if sessions_completed > 0 and sessions_completed % 5 == 0:
-                        base_rest = random.uniform(8.0, 15.0)
-                        console.print(f"[dim]☕ Short break after {sessions_completed} sessions — resting for {base_rest:.0f}s...[/]\n")
-                    else:
-                        console.print(f"[dim]⏳ Resting for {base_rest:.0f}s before next session...[/]\n")
-                    # add small jitter
-                    base_rest += random.gauss(0, 0.4)
-                    base_rest = max(2.0, base_rest)
+                    base_rest += random.gauss(0, 1.0)
+                    base_rest = max(15.0, base_rest)
+                    console.print(f"[dim]⏳ Resting for {base_rest:.0f}s before next session...[/]\n")
                     time.sleep(base_rest)
 
         except KeyboardInterrupt:

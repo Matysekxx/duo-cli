@@ -371,14 +371,14 @@ class TestStreakGradient(unittest.TestCase):
 
 
 class TestAutoPracticeTiming(unittest.TestCase):
-    def test_fixed_delays_fast(self):
+    def test_fixed_delays_balanced(self):
         from duo.practice import AutoPractice
         from unittest.mock import MagicMock
         c = MagicMock()
         c.is_authenticated.return_value = True
         ap = AutoPractice(c)
-        self.assertEqual(ap.delay_min, 0.4)
-        self.assertEqual(ap.delay_max, 0.8)
+        self.assertEqual(ap.delay_min, 0.8)
+        self.assertEqual(ap.delay_max, 1.6)
         self.assertFalse(hasattr(ap, "fast") and ap.fast is True)  # no fast mode
 
     def test_no_fast_attr(self):
@@ -387,15 +387,15 @@ class TestAutoPracticeTiming(unittest.TestCase):
         c = MagicMock()
         ap = AutoPractice(c, max_sessions=5)
         self.assertNotIn("fast", ap.__dict__ or {} if hasattr(ap, "__dict__") else {})
-        self.assertEqual(ap.delay_min, 0.4)
+        self.assertEqual(ap.delay_min, 0.8)
 
     def test_rest_pause_range(self):
         import inspect
         from duo import practice as m
         from duo.practice import AutoPractice
         src = inspect.getsource(AutoPractice.run)
-        has_rest = ("3.0, 8.0" in src) or ("self.rest_min" in src and "self.rest_max" in src) or ("AUTO_REST_MIN" in inspect.getsource(m))
-        self.assertTrue(has_rest, "AutoPractice should use fast rest pause")
+        has_rest = ("25.0, 35.0" in src) or ("self.rest_min" in src and "self.rest_max" in src) or ("AUTO_REST_MIN" in inspect.getsource(m))
+        self.assertTrue(has_rest, "AutoPractice should use 25-35s rest pause")
         self.assertNotIn("Retrying", src)
 
 
