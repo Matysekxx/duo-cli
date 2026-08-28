@@ -170,9 +170,25 @@ def render_status(data: Dict[str, Any], user_data: Optional[Dict[str, Any]] = No
     console.print(f"[bold bright_cyan]🦉  DUOLINGO DASHBOARD[/]  [dim]@{username}[/dim]")
     console.print(f"[{accent} dim]{SECTION_SEP}[/]")
     console.print(f"  [dim]Course[/dim]         [bold bright_cyan]{course_display}[/]")
-    console.print(f"  [dim]Streak[/dim]         [bold bright_yellow]{streak} days[/]  {streak_badge}")
     console.print(f"  [dim]Total XP[/dim]       [bold bright_magenta]{total_xp:,} XP[/]")
     console.print(f"  [dim]Gems[/dim]           [bold bright_yellow]{gems:,}[/]")
+    # Streak gradient: short=yellow, 7d+=green, 30d+=bright_green+trophy, 100d+=gold
+    if streak == 0:
+        streak_color = "dim"
+        streak_icon = "💤"
+    elif streak < 7:
+        streak_color = "bright_yellow"
+        streak_icon = "🔥"
+    elif streak < 30:
+        streak_color = "bright_green"
+        streak_icon = "🔥"
+    elif streak < 100:
+        streak_color = "bold bright_green"
+        streak_icon = "🏆"
+    else:
+        streak_color = "bold yellow"
+        streak_icon = "👑"
+    console.print(f"  [dim]Streak[/dim]         [{streak_color}]{streak_icon} {streak} days[/]  {streak_badge}")
     console.print(f"[{accent} dim]{SECTION_SEP}[/]")
     console.print(f"  {effect_msg}")
     console.print()
@@ -195,6 +211,23 @@ def render_calendar(calendar_data: List[Dict[str, Any]], days: int = 14) -> None
         table.add_row(date_str, day_name, status, xp)
 
     console.print(table)
+    # Heatmap line: ▇ blocks colored by XP intensity
+    try:
+        blocks = []
+        for d in calendar_data:
+            xp = d.get("xp", 0)
+            if xp == 0:
+                blocks.append("[dim]░[/]")
+            elif xp <= 10:
+                blocks.append("[bright_yellow]▇[/]")
+            elif xp <= 30:
+                blocks.append("[bright_green]▇[/]")
+            else:
+                blocks.append("[bold bright_green]▇[/]")
+        console.print("  " + " ".join(blocks) + "  [dim]heatmap[/dim]")
+        console.print("  [dim]░ 0  ▇ 1-10  ▇ 11-30  ▇ 30+ XP[/dim]")
+    except Exception:
+        pass
     console.print(f"[dim]{SECTION_SEP}[/dim]")
 
 
@@ -361,6 +394,7 @@ def render_help() -> None:
         ("PROFILE & SOCIAL", "account and network", [
             ("profile", "User profile card and stats"),
             ("friends", "Friends and following leaderboard"),
+            ("leaderboard", "XP leaderboard — you + friends ranked  [dim](weekly XP)[/dim]"),
             ("whoami", "Show current authenticated account"),
         ]),
         ("STORE & SESSION", "shop, streak freeze, and settings", [
@@ -574,3 +608,49 @@ def render_build_card(
     console.print()
     console.print("  [dim]Type numbers in order [yellow]3 1 4 2[/] or type the full sentence.[/dim]")
     console.print(f"[dim]{SECTION_SEP}[/dim]")
+
+
+def render_leaderboard(entries: List[Dict[str, Any]]) -> None:
+    """Display a ranked XP leaderboard for self + friends."""
+    if not entries:
+        print_info("No leaderboard data available. Make sure you follow some friends.")
+        return
+
+    console.print()
+    console.print("[bold bright_cyan]🏆  LEADERBOARD[/]  [dim]· you + friends · sorted by weekly XP[/dim]")
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+
+    table = _make_table("")
+    table.title = None
+    table.add_column("#", justify="right", style="dim", no_wrap=True)
+    table.add_column("User", style="bold white")
+    table.add_column("Weekly XP", justify="right", style="bold bright_green")
+    table.add_column("Total XP", justify="right", style="bright_magenta")
+    table.add_column("Streak", justify="center", style="bright_yellow")
+
+    for e in entries:
+        rank = e["rank"]
+        username = e.get("username", "?")
+        name = e.get("name") or username
+        display = f"[bold bright_yellow]→ @{username}[/]" if e.get("is_self") else f"@{username}"
+        if name and name != username:
+            display = (f"[bold bright_yellow]→ {name}[/]" if e.get("is_self") else name) + f" [dim]@{username}[/dim]"
+
+        # Rank medal for top 3
+        rank_str = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, str(rank))
+
+        weekly = e.get("xp_this_week", 0)
+        total = e.get("total_xp", 0)
+        streak = e.get("streak", 0)
+
+        table.add_row(
+            rank_str,
+            display,
+            f"+{weekly:,} XP" if weekly else "—",
+            f"{total:,} XP",
+            f"{streak}d" if streak else "—",
+        )
+
+    console.print(table)
+    console.print(f"[dim]{SECTION_SEP}[/dim]")
+    console.print()
