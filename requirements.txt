@@ -1,3 +1,4 @@
+# Canonical dependencies are in pyproject.toml — this file is kept for pip -r compatibility
 requests>=2.31.0
 rich>=13.0.0
 click>=8.0.0

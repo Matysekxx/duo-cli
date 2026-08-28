@@ -59,8 +59,12 @@ def parse_env_file(filepath: Path) -> Dict[str, str]:
             try:
                 target = filepath.resolve()
                 cwd = Path.cwd().resolve()
+                # Block symlinks pointing outside cwd (potential secret exfiltration)
                 if cwd not in target.parents and target != cwd:
-                    pass
+                    return data
+                # Also block if resolved size is unexpectedly large
+                if target.stat().st_size > 64 * 1024:
+                    return data
             except Exception:
                 return data
     except Exception:
@@ -287,6 +291,27 @@ def clear_config() -> None:
                 p.unlink()
             except Exception:
                 pass
+
+
+def get_jwt_expiry() -> Optional[int]:
+    """Return JWT exp timestamp if decodable, else None."""
+    import base64
+
+    jwt = get_jwt()
+    if not jwt:
+        return None
+    try:
+        parts = jwt.split(".")
+        if len(parts) != 3:
+            return None
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+        exp = data.get("exp")
+        if isinstance(exp, int) and exp > 0:
+            return exp
+    except Exception:
+        return None
+    return None
 
 
 def is_authenticated() -> bool:
