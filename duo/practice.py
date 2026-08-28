@@ -7,7 +7,7 @@ import time
 from typing import Any, Dict, List, Optional
 from rich.prompt import Prompt
 
-from .api import DuoClient, extract_challenge_solution, get_flag
+from .api import AUDIO_CHALLENGE_TYPES, DuoAPIError, DuoClient, extract_challenge_solution, get_flag
 from .config import get_preset_language
 
 # ---------------------------------------------------------------------------
@@ -27,11 +27,60 @@ VISUAL_CHALLENGE_TYPES = {
     "svgPuzzle",
 }
 
-# Auto mode timing — fixed as requested (1-2s per question, 20-50s between)
+# Auto mode timing — base range
 AUTO_QUESTION_DELAY_MIN = 1.0
 AUTO_QUESTION_DELAY_MAX = 2.0
 AUTO_REST_MIN = 20.0
 AUTO_REST_MAX = 50.0
+
+# Per-type multipliers: tasks requiring reading/writing take longer,
+# single-choice tasks are faster. Tuned so average with base 1-2s lands
+# around 2.5-4.5s with prompt-length bonus.
+_TYPE_DELAY_MULTIPLIER = {
+    "translate": 1.7,
+    "completeReverseTranslation": 1.6,
+    "typeCloze": 1.5,
+    "typeClozeTable": 1.5,
+    "typeComplete": 1.4,
+    "typeCompleteTable": 1.4,
+    "tapComplete": 1.3,
+    "tapCompleteTable": 1.3,
+    "patternTapComplete": 1.3,
+    "tapCloze": 1.2,
+    "tapClozeTable": 1.2,
+    "gapFill": 1.2,
+    "orderTapComplete": 1.3,
+    "syllableTap": 1.1,
+    "match": 1.4,
+    "assist": 0.9,
+    "select": 0.9,
+    "characterSelect": 0.9,
+    "radioSelect": 0.9,
+    "judge": 0.9,
+}
+
+
+def _human_delay(
+    base_min: float,
+    base_max: float,
+    prompt: str = "",
+    ctype: str = "",
+) -> float:
+    """Compute human-like per-question pause.
+
+    - Starts from uniform(base_min, base_max).
+    - Applies per-type multiplier (harder types = longer).
+    - Adds prompt-length bonus (~0.015s per char, capped at 2.5s) to simulate
+      reading time.
+    - Adds small Gaussian jitter for natural variance.
+    """
+    base = random.uniform(base_min, base_max)
+    mult = _TYPE_DELAY_MULTIPLIER.get(ctype, 1.0)
+    pause = base * mult
+    if prompt:
+        pause += min(len(prompt) * 0.015, 2.5)
+    pause += random.gauss(0, 0.18)
+    return max(0.8, min(pause, 8.0))
 from .ui import (
     DIVIDER_LINE,
     console,
@@ -279,7 +328,9 @@ class PracticeSession:
 
 
 class AutoPractice:
-    """Automated Practice Solver Engine — fixed 1-2s per question, 20-50s between lessons."""
+    """Automated Practice Solver Engine with human-like delays."""
+
+
 
     # Re-export constants for easy external tuning / testing
     QUESTION_DELAY_MIN = AUTO_QUESTION_DELAY_MIN
@@ -297,7 +348,6 @@ class AutoPractice:
         self.lang_code = lang_code
         self.max_sessions = max_sessions
         self.hearts = 5
-        # Fixed timing — single source, easy to extend via constructor later if needed
         self.delay_min = self.QUESTION_DELAY_MIN
         self.delay_max = self.QUESTION_DELAY_MAX
         self.rest_min = self.REST_MIN
@@ -369,22 +419,41 @@ class AutoPractice:
 
                 console.print(f"[bold bright_cyan]▶ Starting Session {session_num}...[/]")
 
-                # Create live session on server — no retry, fail cleanly if it breaks
-                try:
-                    server_sess = self.client.create_practice_session(self.lang_code)
-                    raw_challenges = server_sess.get("challenges", [])
-
-                    # Use the user's real heart count so a perfect run never
-                    # silently refills a depleted account on submit.
+                # Create live session on server — with retry + exponential backoff.
+                server_sess = None
+                raw_challenges: List[Dict[str, Any]] = []
+                last_err: Optional[Exception] = None
+                for attempt in range(1, 4):
                     try:
-                        h = self.client.get_hearts()
-                        if not h.get("is_unlimited") and isinstance(h.get("hearts"), int):
-                            self.hearts = max(0, h["hearts"])
-                    except Exception:
-                        pass
-                except Exception as e:
-                    print_error(f"Could not create practice session: {e}")
+                        server_sess = self.client.create_practice_session(self.lang_code)
+                        raw_challenges = server_sess.get("challenges", []) if server_sess else []
+                        if raw_challenges:
+                            last_err = None
+                            break
+                        # Empty but no exception — treat as retryable
+                        raise DuoAPIError("Empty challenges list") if attempt < 3 else None
+                    except Exception as e:
+                        last_err = e
+                        if attempt < 3:
+                            backoff = random.uniform(2.0, 5.0) * attempt
+                            print_warning(f"Session creation failed (attempt {attempt}/3): {e} — retrying in {backoff:.0f}s…")
+                            time.sleep(backoff)
+                        else:
+                            print_error(f"Could not create practice session after 3 attempts: {e}")
+                if last_err is not None and not raw_challenges:
                     break
+                if server_sess is None:
+                    print_error("Could not create practice session: unknown error")
+                    break
+
+                # Use the user's real heart count so a perfect run never
+                # silently refills a depleted account on submit.
+                try:
+                    h = self.client.get_hearts()
+                    if not h.get("is_unlimited") and isinstance(h.get("hearts"), int):
+                        self.hearts = max(0, h["hearts"])
+                except Exception:
+                    pass
 
                 if not raw_challenges:
                     print_error("No challenges returned by server — stopping.")
@@ -394,13 +463,18 @@ class AutoPractice:
                 score = 0
                 session_start_time = time.time()
 
-                # Solve each question — fixed 1-2s per question (extensible via constants)
+                # Solve each question — humanized delay per challenge type.
                 for q_idx, ch in enumerate(raw_challenges, 1):
                     details = extract_challenge_solution(ch)
                     prompt = details.get("prompt") or f"Question {q_idx}"
                     answer = details.get("answer") or "OK"
+                    ctype = details.get("type") or ch.get("type", "")
 
-                    pause = random.uniform(self.delay_min, self.delay_max)
+                    # Fast path for audio/visual challenges — still count but with minimal pause.
+                    if ctype in AUDIO_CHALLENGE_TYPES or ctype in VISUAL_CHALLENGE_TYPES:
+                        pause = random.uniform(0.6, 1.2)
+                    else:
+                        pause = _human_delay(self.delay_min, self.delay_max, prompt, ctype)
                     render_auto_challenge(
                         session_idx=session_num,
                         total_sessions=0 if loop else (sessions if (not until_goal and not target_xp) else 0),
@@ -449,10 +523,18 @@ class AutoPractice:
                         should_continue = False
 
                 if should_continue:
-                    # Fixed pause between lessons: 20-50s (single source, easy to tune)
-                    rest_pause = random.uniform(self.rest_min, self.rest_max)
-                    console.print(f"[dim]⏳ Resting for {rest_pause:.0f}s before next session...[/]\n")
-                    time.sleep(rest_pause)
+                    # Pause between lessons: 20-50s base + jitter.
+                    # Every 5 sessions add a longer break (40-80s) to reduce detection risk.
+                    base_rest = random.uniform(self.rest_min, self.rest_max)
+                    if sessions_completed > 0 and sessions_completed % 5 == 0:
+                        base_rest = random.uniform(40, 80)
+                        console.print(f"[dim]☕ Longer break after {sessions_completed} sessions — resting for {base_rest:.0f}s...[/]\n")
+                    else:
+                        console.print(f"[dim]⏳ Resting for {base_rest:.0f}s before next session...[/]\n")
+                    # add small jitter
+                    base_rest += random.gauss(0, 1.5)
+                    base_rest = max(12, base_rest)
+                    time.sleep(base_rest)
 
         except KeyboardInterrupt:
             console.print("\n[bold bright_yellow]⚠ Auto practice paused by user (Ctrl+C).[/]")

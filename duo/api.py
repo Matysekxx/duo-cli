@@ -742,13 +742,32 @@ class DuoClient:
         err = data.get("error", "Purchase failed")
         raise DuoAPIError(f"Shop error: {err}")
 
-    def create_practice_session(self, lang_abbr: str) -> Dict[str, Any]:
-        """Fetch an interactive practice session from Duolingo."""
+    SUPPORTED_SESSION_TYPES = ("GLOBAL_PRACTICE", "LESSON", "PRACTICE", "TEST")
+
+    def create_practice_session(
+        self,
+        lang_abbr: str,
+        session_type: str = "GLOBAL_PRACTICE",
+        level_index: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Fetch an interactive practice session from Duolingo.
+
+        Args:
+            lang_abbr: Learning language (e.g. 'es').
+            session_type: One of SUPPORTED_SESSION_TYPES. Defaults to
+                GLOBAL_PRACTICE which is safest for farming (no path progress
+                side-effects). Use LESSON for path advancement.
+            level_index: Optional path level for LESSON type.
+        """
         user_data = self.verify_auth()
         from_lang = user_data.get("fromLanguage", "en")
 
+        stype = (session_type or "GLOBAL_PRACTICE").upper()
+        if stype not in self.SUPPORTED_SESSION_TYPES:
+            raise DuoAPIError(f"Unsupported session type: {session_type!r} — choose from {self.SUPPORTED_SESSION_TYPES}")
+
         url = "https://www.duolingo.com/2017-06-30/sessions"
-        payload = {
+        payload: Dict[str, Any] = {
             "challengeTypes": CHALLENGE_TYPES,
             "fromLanguage": from_lang,
             "isFinalLevel": False,
@@ -756,12 +775,22 @@ class DuoClient:
             "juicy": True,
             "learningLanguage": lang_abbr,
             "smartTipsVersion": 2,
-            "type": "GLOBAL_PRACTICE"
+            "type": stype,
         }
+        if level_index is not None and stype == "LESSON":
+            payload["levelIndex"] = level_index
 
         resp = self.request("POST", url, json=payload)
         if resp.status_code == 200:
             return resp.json()
+
+        # Fallback: if LESSON not available, retry as GLOBAL_PRACTICE.
+        if stype == "LESSON" and resp.status_code in (400, 404, 422):
+            payload["type"] = "GLOBAL_PRACTICE"
+            payload.pop("levelIndex", None)
+            resp2 = self.request("POST", url, json=payload)
+            if resp2.status_code == 200:
+                return resp2.json()
 
         raise DuoAPIError(f"Could not create practice session on server ({resp.status_code}).")
 
