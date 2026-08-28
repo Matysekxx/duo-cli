@@ -71,6 +71,22 @@ def _require_auth(func: Callable) -> Callable:
     return wrapper
 
 
+def _check_jwt_expiry_warning() -> None:
+    """Print warning if JWT expires within 7 days."""
+    try:
+        exp = get_jwt_expiry()
+        if exp:
+            import datetime
+
+            days_left = (datetime.datetime.fromtimestamp(exp) - datetime.datetime.now()).days
+            if days_left < 7:
+                print_warning(f"JWT expires in {days_left} days — refresh it via 'duo login' soon!")
+            elif days_left < 0:
+                print_warning("JWT appears expired — run 'duo login' with a fresh token.")
+    except Exception:
+        pass
+
+
 def _parse_shell_auto_args(args: list[str]) -> dict:
     """Parse `auto` flags inside the interactive shell (simple, no click re-parse)."""
     params: dict = {
@@ -149,6 +165,7 @@ def cli(ctx: click.Context, version: bool, verbose: bool) -> None:
             user_data = client.verify_auth()
             streak_info = client.get_streak_info()
             render_status(streak_info, user_data)
+            _check_jwt_expiry_warning()
         except DuoAPIError as e:
             print_error(str(e))
         except Exception as e:
@@ -234,6 +251,7 @@ def status_cmd() -> None:
         user_data = client.verify_auth()
         streak_info = client.get_streak_info()
         render_status(streak_info, user_data)
+        _check_jwt_expiry_warning()
     except Exception as e:
         print_error(f"Failed to load status: {e}")
 
@@ -303,7 +321,7 @@ def calendar_cmd(days: int) -> None:
     try:
         client = DuoClient()
         cal = client.get_streak_calendar(days)
-        render_calendar(cal)
+        render_calendar(cal, days=days)
     except Exception as e:
         print_error(f"Failed to load calendar: {e}")
 

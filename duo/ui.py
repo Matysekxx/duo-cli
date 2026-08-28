@@ -178,8 +178,8 @@ def render_status(data: Dict[str, Any], user_data: Optional[Dict[str, Any]] = No
     console.print()
 
 
-def render_calendar(calendar_data: List[Dict[str, Any]]) -> None:
-    table = _make_table("ACTIVITY  ·  LAST 14 DAYS")
+def render_calendar(calendar_data: List[Dict[str, Any]], days: int = 14) -> None:
+    table = _make_table(f"ACTIVITY  ·  LAST {days} DAYS")
     table.add_column("Date", style="bold white", no_wrap=True)
     table.add_column("Day", justify="center", style="bright_blue")
     table.add_column("Status", justify="center")
