@@ -213,18 +213,22 @@ class TestCliResilience(unittest.TestCase):
     def test_version_unified(self):
         from duo.cli import cli
         from duo.ui import __version__ as ui_ver
+        from duo import __version__ as core_ver
         result = self.runner.invoke(cli, ["--version"])
         self.assertEqual(result.exit_code, 0)
         self.assertIn(ui_ver, result.output)
-        self.assertIn("1.1.0", result.output)
+        self.assertIn(core_ver, result.output)
+        self.assertEqual(ui_ver, core_ver)
 
 
 class TestUIVersion(unittest.TestCase):
     def test_banner_contains_version(self):
         from duo.ui import _build_banner, __version__
+        from duo import __version__ as core_ver
         banner = _build_banner()
         self.assertIn(f"v{__version__}", banner)
-        self.assertIn("1.1.0", banner)
+        self.assertIn(core_ver, banner)
+        self.assertEqual(__version__, core_ver)
 
     def test_make_table_borderless(self):
         from duo.ui import _make_table
