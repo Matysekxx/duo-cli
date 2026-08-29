@@ -12,12 +12,19 @@ def render_auto_header(
     target_xp: Optional[int],
     until_goal: bool,
     loop: bool = False,
+    max_sessions: Optional[int] = None,
 ) -> None:
     """Render the header banner for automated practice."""
-    if loop or (sessions is None and not target_xp and not until_goal):
-        goal_mode = "∞  Continuous / Infinite"
+    if until_goal:
+        goal_mode = "Until daily goal"
+    elif target_xp:
+        goal_mode = f"Target: {target_xp} XP"
+    elif sessions is not None:
+        goal_mode = f"{sessions} session(s)"
+    elif max_sessions is not None:
+        goal_mode = f"Continuous (max {max_sessions} sessions)"
     else:
-        goal_mode = "Until daily goal" if until_goal else (f"Target: {target_xp} XP" if target_xp else f"{sessions} session(s)")
+        goal_mode = "∞  Continuous / Infinite"
 
     console.print()
     console.print("[bold bright_green]⚡  AUTO PRACTICE[/]")

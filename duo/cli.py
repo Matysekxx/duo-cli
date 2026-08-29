@@ -616,10 +616,9 @@ def auto_cmd(
     except Exception as e:
         print_error(f"Invalid numeric option: {e}")
         return
-    if loop:
+    if loop and not max_sessions:
         print_warning(
-            "[bold yellow]⚠ Endless auto (-L) can look like botting to Duolingo and risks a ban. "
-            "Use -m/--max-sessions to set a limit.[/]"
+            "Endless auto (-L) without --max-sessions can look like botting to Duolingo and risks a ban."
         )
     if dry_run:
         print_warning("Dry run — XP will NOT be submitted.")

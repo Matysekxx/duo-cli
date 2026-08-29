@@ -93,6 +93,7 @@ class AutoEngine(BaseEngine):
             target_xp=target_xp,
             until_goal=until_goal,
             loop=is_continuous,
+            max_sessions=self.max_sessions,
         )
 
         sessions_completed = 0
@@ -166,7 +167,7 @@ class AutoEngine(BaseEngine):
 
                     render_auto_challenge(
                         session_idx=session_num,
-                        total_sessions=0 if is_continuous else (effective_sessions or 0),
+                        total_sessions=self.max_sessions if (self.max_sessions and is_continuous) else (0 if is_continuous else (effective_sessions or 0)),
                         q_idx=q_idx,
                         total_q=total_q,
                         prompt=prompt,
