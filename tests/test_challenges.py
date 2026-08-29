@@ -182,5 +182,34 @@ class TestLanguageResolution(unittest.TestCase):
         self.assertEqual(s.lang_code, "ja")
 
 
+class TestChallengeParser(unittest.TestCase):
+    def test_parse_returns_challenge_dataclass(self):
+        from duo.challenges import ChallengeParser
+        from duo.models import Challenge
+
+        parser = ChallengeParser()
+        ch = parser.parse({
+            "type": "assist",
+            "prompt": "dog",
+            "choices": ["perro", "gato"],
+            "correctIndex": 0,
+        })
+        self.assertIsInstance(ch, Challenge)
+        self.assertEqual(ch.type, "assist")
+        self.assertEqual(ch.answer, "perro")
+        self.assertEqual(ch.choices, ["perro", "gato"])
+        self.assertFalse(ch.is_visual)
+        self.assertFalse(ch.is_audio)
+        self.assertTrue(ch.is_renderable)
+
+    def test_visual_challenge_property(self):
+        from duo.challenges import ChallengeParser
+
+        parser = ChallengeParser()
+        ch = parser.parse({"type": "characterWrite", "prompt": "a"})
+        self.assertTrue(ch.is_visual)
+
+
 if __name__ == "__main__":
     unittest.main()
+

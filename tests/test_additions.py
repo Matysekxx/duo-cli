@@ -430,5 +430,29 @@ class TestModuleExecution(unittest.TestCase):
             self.assertIsNone(s.lang_code)
 
 
+class TestOOPArchitecture(unittest.TestCase):
+    def test_credential_store(self):
+        from duo.config import CredentialStore
+        store = CredentialStore()
+        self.assertIsInstance(store.is_authenticated, bool)
+
+    def test_timing_config_and_calculator(self):
+        from duo.engine.timing import HumanDelayCalculator, TimingConfig
+        cfg = TimingConfig(question_delay_min=1.0, question_delay_max=2.0, rest_min=20.0, rest_max=30.0)
+        calc = HumanDelayCalculator(cfg)
+        d = calc.question_delay("hello", "translate")
+        self.assertGreaterEqual(d, 0.6)
+        r = calc.rest_delay()
+        self.assertGreaterEqual(r, 15.0)
+
+    def test_models_dataclass(self):
+        from duo.models import SessionResult
+        res = SessionResult(score=10, total=10, xp_gained=15, streak_extended=True, synced=True)
+        self.assertEqual(res.score, 10)
+        self.assertEqual(res.xp_gained, 15)
+        self.assertTrue(res.synced)
+
+
 if __name__ == "__main__":
     unittest.main()
+
