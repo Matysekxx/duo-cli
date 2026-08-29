@@ -3,6 +3,7 @@ Backward-compatibility shim for duo.practice.
 Real implementations live in the modular `duo.engine` and `duo.challenges` packages.
 """
 
+from .config import get_preset_language
 from .challenges.normalizer import normalize_answer
 from .challenges.types import (
     AUDIO_CHALLENGE_TYPES,

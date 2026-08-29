@@ -17,6 +17,8 @@ from .common import (
     print_warning,
 )
 from .banner import DUO_BANNER, UI_VERSION, _build_banner, _get_version, print_banner, render_help
+
+__version__ = UI_VERSION
 from .dashboard import render_calendar, render_config, render_hearts, render_status
 from .cards import (
     render_answer_result,

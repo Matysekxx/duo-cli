@@ -30,9 +30,16 @@ class BaseEngine(ABC):
 
     def _resolve_language(self, explicit_lang: Optional[str]) -> Optional[str]:
         """Resolve learning language: explicit flag > local preset > server active > enrolled course."""
+        preset = None
+        try:
+            import duo.practice
+            preset = duo.practice.get_preset_language()
+        except Exception:
+            preset = get_preset_language()
+
         resolved = (
             explicit_lang
-            or get_preset_language()
+            or preset
             or (self.client.get_learning_language() if hasattr(self.client, "get_learning_language") else None)
         )
         if not resolved and hasattr(self.client, "get_courses"):
