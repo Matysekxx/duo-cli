@@ -24,7 +24,7 @@ from .config import (
     set_credentials,
     set_preset_language,
 )
-from .practice import AutoPractice, PracticeSession
+from .engine import AutoEngine as AutoPractice, InteractiveEngine as PracticeSession
 from .ui import (
     DIVIDER_LINE,
     __version__ as UI_VERSION,
@@ -94,7 +94,7 @@ def _parse_shell_auto_args(args: list[str]) -> dict:
         "until_goal": "-g" in args or "--until-goal" in args,
         "loop": "-L" in args or "--loop" in args,
         "dry_run": "--dry-run" in args,
-        "sessions": 1,
+        "sessions": None,
         "target_xp": None,
         "lang": None,
         "max_sessions": None,
@@ -579,15 +579,15 @@ def practice_cmd(lang: Optional[str], dry_run: bool) -> None:
 
 
 @cli.command("auto")
-@click.option("--sessions", "-s", default=1, type=int, help="Number of practice sessions to complete (default: 1)")
+@click.option("--sessions", "-s", default=None, type=int, help="Number of practice sessions to complete (default: continuous)")
 @click.option("--target-xp", "-x", default=None, type=int, help="Target XP to earn before stopping")
 @click.option("--until-goal", "-g", is_flag=True, help="Run practice sessions until today's daily XP goal is reached")
 @click.option("--loop", "-L", is_flag=True, help="Run practice sessions forever (until Ctrl+C)")
 @click.option("--lang", "-l", default=None, help="Target language code (e.g. en, es, de, fr)")
-@click.option("--max-sessions", "-m", default=None, type=int, help="Hard cap on number of sessions (recommended with -L to avoid bans)")
+@click.option("--max-sessions", "-m", default=None, type=int, help="Hard cap on number of sessions (recommended to avoid bans)")
 @click.option("--dry-run", is_flag=True, help="Simulate sessions without submitting XP")
 def auto_cmd(
-    sessions: int,
+    sessions: Optional[int],
     target_xp: Optional[int],
     until_goal: bool,
     loop: bool,

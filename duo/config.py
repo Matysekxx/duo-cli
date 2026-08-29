@@ -336,3 +336,38 @@ def set_preset_language(lang_code: str) -> None:
     data = _read_config()
     data["preset_language"] = clean
     _atomic_write_json(CONFIG_FILE, data)
+
+
+class CredentialStore:
+    """Object-oriented manager for duo-cli credentials and preferences."""
+
+    @property
+    def jwt(self) -> Optional[str]:
+        return get_jwt()
+
+    @property
+    def username(self) -> Optional[str]:
+        return get_username()
+
+    @property
+    def preset_language(self) -> Optional[str]:
+        return get_preset_language()
+
+    @preset_language.setter
+    def preset_language(self, lang_code: str) -> None:
+        set_preset_language(lang_code)
+
+    @property
+    def is_authenticated(self) -> bool:
+        return is_authenticated()
+
+    @property
+    def jwt_expiry(self) -> Optional[int]:
+        return get_jwt_expiry()
+
+    def set_credentials(self, username: str, jwt_token: str) -> None:
+        set_credentials(username, jwt_token)
+
+    def clear(self) -> None:
+        clear_config()
+
